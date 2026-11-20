@@ -16,8 +16,17 @@ def transcribe(audio_path: Path) -> list[dict]:
     key = (cfg["model"], cfg["compute_type"])
     if key not in _models:
         _models[key] = WhisperModel(cfg["model"], device="cpu", compute_type=cfg["compute_type"])
+    # decode with ffmpeg ourselves (16 kHz mono float32) — avoids PyAV version issues inside faster-whisper
+    import subprocess
+
+    import numpy as np
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(audio_path), "-ac", "1", "-ar", "16000",
+                          "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    samples = np.frombuffer(raw, np.float32).copy()
+    if samples.size < 1600:
+        return []
     segments, _ = _models[key].transcribe(
-        str(audio_path), language="en", word_timestamps=True, vad_filter=True,
+        samples, language="en", word_timestamps=True, vad_filter=True,
         beam_size=5, condition_on_previous_text=False)
     words = []
     for seg in segments:
