@@ -197,7 +197,8 @@ def main() -> int:
                                   "trace": tb[-2500:]})
         if not r:
             send_text(f"❌ #{jid}: ошибка монтажа: {e}"[:500])
-        return 1
+            return 1
+        return 0  # already reported to the bot; don't send a second message from the workflow
     print(json.dumps({"ok": True, "job": jid}, ensure_ascii=False))
     return 0
 
