@@ -23,6 +23,12 @@ def esc(text: str) -> str:
     return text.replace("\\", "").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
+def renderable(text: str) -> str:
+    """The Anton font has Latin letters, digits and punctuation only: drop emoji and other symbols."""
+    t = re.sub(r"[^A-Za-z0-9 .,!?'’\-&$%#:/()+]", "", text or "")
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def clean_word(w: str) -> str:
     w = re.sub(r"[^\w'’!?\-$%#&]", "", w, flags=re.UNICODE)
     return w.upper()
@@ -121,6 +127,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                   f"{{\\an5\\pos(540,{y})\\fs{size}\\1c{col}{pop}}}{txt}")
 
     # --- title: first seconds, under the webcam (never over the face)
+    title = renderable(title)
     if title:
         lines = wrap_title(title)
         acc = (title_accent_word or "").upper()
@@ -141,7 +148,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         rnd = random.Random(7)
         for s in shouts:
             t = float(s["t"])
-            if t < tsec or t >= total - 0.3:
+            text = renderable(s.get("text", "")).upper()[:22]
+            if t < tsec or t >= total - 0.3 or not text:
                 continue
             x = rnd.choice([260, 540, 820])
             y = rnd.randint(cam_h + 230, cam_h + int((H - cam_h) * 0.45))
@@ -149,12 +157,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             anim = (rf"\frz{rot}\fscx20\fscy20\t(0,110,\fscx125\fscy125)\t(110,200,\fscx100\fscy100)"
                     r"\fad(0,150)")
             ev.append(f"Dialogue: 4,{ass_time(t)},{ass_time(min(total, t + 0.9))},Shout,,0,0,0,,"
-                      f"{{\\an5\\pos({x},{y}){anim}}}{esc(s['text'].upper())[:22]}")
+                      f"{{\\an5\\pos({x},{y}){anim}}}{esc(text)}")
 
-    # --- credit
+    # --- credit: bottom-left, just above the progress bar (never on the face)
     if style.get("watermark", True) and streamer:
         ev.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Credit,,0,0,0,,"
-                  f"{{\\an1\\pos(26,{cam_h - 18})\\alpha&H30&}}twitch.tv/{esc(streamer)}")
+                  f"{{\\an1\\pos(26,{H - 30})\\alpha&H30&}}twitch.tv/{esc(streamer)}")
 
     path.write_text(head + "\n".join(ev) + "\n", encoding="utf-8")
     return path
