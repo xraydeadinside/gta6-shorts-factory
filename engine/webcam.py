@@ -93,15 +93,18 @@ def _snap(edges: np.ndarray, box: tuple[float, float, float, float], search: flo
         span = slice(int(lo * (h if axis == "v" else w)), max(int(hi * (h if axis == "v" else w)), 1))
         n = w if axis == "v" else h
         a, b = int(max(0, (pos - search) * n)), int(min(n - 1, (pos + search) * n))
-        best_p, best_s = pos, 0.0
+        scores = []
         for p in range(a, b + 1):
             col = edges[span, p] if axis == "v" else edges[p, span]
-            if col.size == 0:
-                continue
-            s = float((col > 0.6).mean())  # share of the side covered by a persistent edge
-            if s > best_s:
-                best_p, best_s = p / n, s
-        return best_p if best_s >= thr else pos
+            scores.append(float(col.mean()) if col.size else 0.0)  # how often this line is an edge
+        if not scores:
+            return pos
+        arr = np.array(scores)
+        k = int(arr.argmax())
+        # a real border is clearly stronger than its neighbourhood (moving content inside/outside)
+        if arr[k] >= thr * 0.6 and arr[k] >= 1.5 * float(np.median(arr)) + 0.02:
+            return (a + k) / n
+        return pos
 
     res[0] = best_line("v", x0, y0, y1)
     res[2] = best_line("v", x1, y0, y1)
