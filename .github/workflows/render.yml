@@ -1,0 +1,71 @@
+name: render
+
+# Started by the Cloudflare Worker (repository_dispatch) when you send /clip, /vod, press "Перемонтировать" etc.
+on:
+  repository_dispatch:
+    types: [render, vod, upload]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "render | vod | upload"
+        default: render
+      job_id:
+        description: "job id from the bot"
+        required: true
+
+concurrency:
+  group: job-${{ github.event.client_payload.job_id || inputs.job_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KIND: ${{ github.event.action || inputs.kind }}
+      JOB_ID: ${{ github.event.client_payload.job_id || inputs.job_id }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+      YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+      YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+      YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+    steps:
+      - name: Tell the bot we started
+        run: |
+          curl -sS -m 20 -X POST "$WORKER_URL/hook/update" -H "X-Hook-Secret: $HOOK_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"job_id\": $JOB_ID, \"stage\": \"⚙️ Сервер запущен\", \"run_url\": \"$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" || true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: ffmpeg
+        run: which ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
+
+      - name: Speech model cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-small-en-v1
+
+      - run: pip install -q -r requirements.txt && pip install -q -U yt-dlp
+
+      - name: Make the short
+        run: python -m engine.run "$KIND" "$JOB_ID"
+
+      - name: Report a crash to the bot
+        if: failure()
+        run: |
+          curl -sS -m 20 -X POST "$WORKER_URL/hook/fail" -H "X-Hook-Secret: $HOOK_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"job_id\": $JOB_ID, \"kind\": \"$KIND\", \"error\": \"Сервер монтажа упал. Лог: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" || true

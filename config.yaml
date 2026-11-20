@@ -1,0 +1,50 @@
+# Основные настройки фабрики. Стиль монтажа можно менять и в веб-панели (там он важнее этого файла).
+
+gemini:
+  models: [gemini-3.5-flash, gemini-3.8-flash, gemini-3.5-flash-lite]   # по очереди, если модель перегружена
+  timeout: 240
+
+transcribe:
+  model: small.en          # faster-whisper; base.en быстрее, но хуже
+  compute_type: int8
+
+download:
+  window_before: 40        # для VOD/YouTube с таймкодом: сколько секунд взять ДО отметки
+  window_after: 25         # и ПОСЛЕ
+  max_full: 150            # видео длиннее без таймкода не берём целиком
+
+style:                     # значения по умолчанию
+  cam_height: 0.36         # доля высоты кадра под вебку
+  max_len: 58              # секунд, итоговый шортс
+  min_len: 12
+  caption_words: 2         # 1 или 2 слова в субтитре
+  caption_size: 100
+  caption_color: "#FFFFFF"
+  punch_color: "#FFE600"
+  title_color: "#FFFFFF"
+  title_accent: "#FFE600"
+  title_seconds: 3.0
+  zoom_strength: 1.0       # 0.5 спокойно … 1.5 очень агрессивно
+  react_zoom: 1.18
+  shouts: true
+  whoosh: true
+  whoosh_volume: 0.35
+  progress_bar: true
+  progress_color: "#FFE600"
+  watermark: true
+  lufs: -14
+
+vod:
+  top_moments: 3           # сколько лучших моментов из записи монтировать
+
+twitch_auto:               # автопоиск клипов через Twitch API — ВЫКЛЮЧЕН
+  enabled: false
+  streamers: []            # ники англоязычных стримеров, которые разрешают нарезки
+  game_name: "Grand Theft Auto VI"
+  min_views: 30
+  lookback_hours: 6
+
+youtube:                   # автозагрузка через YouTube Data API — ВЫКЛЮЧЕНА
+  auto_upload: false
+  privacy: public
+  category_id: "20"        # Gaming

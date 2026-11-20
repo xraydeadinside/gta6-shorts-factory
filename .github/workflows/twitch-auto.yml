@@ -1,0 +1,30 @@
+name: twitch-auto
+
+# Automatic clip search through the Twitch API — OFF.
+# To turn on: see engine/twitch_auto.py, then set repository variable TWITCH_AUTO=true
+# and uncomment the schedule below.
+on:
+  # schedule:
+  #   - cron: "*/20 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  find:
+    if: vars.TWITCH_AUTO == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+      TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+      WORKER_URL: ${{ secrets.WORKER_URL }}
+      HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q requests PyYAML
+      - run: python -m engine.twitch_auto
