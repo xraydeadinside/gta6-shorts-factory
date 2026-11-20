@@ -36,6 +36,8 @@ def sample_frames(video: Path, duration: float, n: int = 24, width: int = 960) -
 
 def _faces(frames: list[np.ndarray]) -> list[list[tuple[float, float, float, float]]]:
     import cv2
+    if not hasattr(cv2, "CascadeClassifier"):  # OpenCV build without Haar cascades: rely on borders + AI
+        return [[] for _ in frames]
     casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     out = []
     for f in frames:

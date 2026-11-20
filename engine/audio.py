@@ -99,7 +99,23 @@ def build(src: Path, tl: list[dict], cuts: list[float], out: Path, *, style: dic
 
     raw = out.with_name(out.stem + "_raw.wav")
     write_wav(raw, mix)
-    return loudnorm(raw, out, float(style.get("lufs", -14)))
+    target = float(style.get("lufs", -14))
+    loudnorm(raw, out, target)
+    return trim_loudness(out, target)
+
+
+def trim_loudness(path: Path, target: float, tol: float = 0.4) -> Path:
+    """loudnorm can land 1-2 dB low when peaks are high: correct with gain + a true-peak limiter."""
+    for _ in range(3):
+        cur = measure_lufs(path)
+        if cur < -70 or abs(cur - target) <= tol:
+            break
+        tmp = path.with_name(path.stem + "_fix.wav")
+        run(["ffmpeg", "-y", "-v", "error", "-i", str(path), "-af",
+             f"volume={target - cur:.2f}dB,alimiter=limit=0.84:attack=2:release=60:level=false",
+             "-ar", str(SR), str(tmp)])
+        tmp.replace(path)
+    return path
 
 
 def loudnorm(src: Path, out: Path, target: float = -14.0) -> Path:
