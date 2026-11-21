@@ -400,10 +400,8 @@ async function hook(req, env, ctx, p, origin) {
     if (body.kind === "vod") {
       await updateJob(env, job.id, { status: "done", stage: "готово", result: body.result });
       const r = body.result || {};
-      const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("
-");
-      if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:
-${lines}`);
+      const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("\n");
+      if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:\n${lines}`);
       return json({ ok: true });
     }
     if (body.kind === "upload") {
