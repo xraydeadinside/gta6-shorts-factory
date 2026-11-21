@@ -142,7 +142,14 @@ def vod_job(job: dict, w: Worker) -> dict:
     if link["kind"] != "twitch_vod":
         raise fetch.UserError("Для /vod нужна ссылка на запись Twitch: twitch.tv/videos/…")
     w.stage(jid, "💬 Читаю чат записи")
-    msgs = fetch_chat(link["url"], link["id"])
+    duration = None
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
+            duration = float(ydl.extract_info(link["url"].split("?")[0], download=False).get("duration") or 0) or None
+    except Exception as e:  # noqa: BLE001 - chat is still read, just sequentially
+        print(f"vod duration unknown: {e}")
+    msgs = fetch_chat(link["url"], link["id"], duration)
     if not msgs:
         raise fetch.UserError("Не удалось прочитать чат этой записи.")
     top = int((config().get("vod") or {}).get("top_moments", 3))

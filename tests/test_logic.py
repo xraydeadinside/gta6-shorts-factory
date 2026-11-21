@@ -181,3 +181,14 @@ def test_chat_spikes():
     assert s and 1190 <= s[0]["peak"] <= 1230 and s[0]["kind"] == "funny"
     assert s[0]["start"] < s[0]["peak"] < s[0]["end"]
     assert any(2390 <= x["peak"] <= 2440 for x in s)
+
+
+def test_chat_spikes_busy_chat():
+    """A huge chat that is always busy (no global 2x jump) must still give its best moments."""
+    import random
+    rnd = random.Random(1)
+    msgs = [(rnd.uniform(0, 14400), rnd.choice(["hi", "speed", "W", "chat", "LUL"])) for _ in range(150000)]
+    msgs += [(5000 + i * 0.02, "KEKW LMAO") for i in range(900)]     # laugh burst at 1:23:20
+    s = find_spikes(msgs, top=3)
+    assert len(s) == 3
+    assert any(4980 <= x["peak"] <= 5030 for x in s)
