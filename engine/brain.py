@@ -20,7 +20,10 @@ YOUTUBE SHORTS RULES (from the channel's YouTube playbook — follow them):
   1-2.5 s TEASER of the most intense instant (role "hook", may be copied from later in the clip), then go back.
 - Retention is king (70%+ completion gets pushed). Cut EVERYTHING boring: dead air, menus, walking around,
   repeated sentences, loading. Visual change at least every 3 seconds.
-- Sweet spots: ~13-25 s for one punchy reaction, up to ~55 s only if the story truly needs it.
+- STORY FIRST: a stranger who never saw the stream must understand what is going on and why it is funny or crazy.
+  Keep the setup that explains the situation (what the streamer is trying to do). Cut dead air, NOT context.
+- Sweet spots: ~20-45 s for a complete mini-story (setup -> turn -> reaction), up to ~55 s if the story needs it.
+  Never cut a story down to a meaningless 10-second fragment.
 - End right after the payoff; ideally the last beat loops back naturally into the first frame (rewatch = views).
 - Title: 4-6 words, 20-40 characters, keyword first ("GTA 6 ..."), curiosity or emotion, no hashtags, no clickbait lies.
   Give 3 genuinely different titles: [0] search-optimised (keyword-forward), [1] browse/curiosity-driven, [2] hybrid.
@@ -91,15 +94,24 @@ def _key() -> str:
     return k
 
 
-def generate(parts: list[dict], schema: dict | None = None, temperature: float = 0.6) -> dict:
-    """Call Gemini with model fallbacks and retries. Returns parsed JSON."""
+def generate(parts: list[dict], schema: dict | None = None, temperature: float = 0.6, *,
+             media_low: bool = False, patience: bool = False) -> dict:
+    """Call Gemini with model fallbacks and retries. Returns parsed JSON.
+
+    media_low: fewer tokens per video frame (long videos). patience: on rate limits wait up to a few
+    minutes instead of giving up (the free tier limits tokens per minute)."""
     cfg = config()["gemini"]
     body = {"contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"}}
     if schema:
         body["generationConfig"]["responseSchema"] = schema
+    if media_low:
+        body["generationConfig"]["mediaResolution"] = "MEDIA_RESOLUTION_LOW"
     last = None
-    for attempt in range(3):
+    attempts = 6 if patience else 3
+    for attempt in range(attempts):
+        if attempt and patience:
+            time.sleep(min(150, 40 * attempt))
         for model in cfg["models"]:
             try:
                 r = requests.post(f"{API}/models/{model}:generateContent", json=body,
@@ -115,7 +127,8 @@ def generate(parts: list[dict], schema: dict | None = None, temperature: float =
                 return out
             except (requests.RequestException, KeyError, IndexError, json.JSONDecodeError) as e:
                 last = f"{model}: {e}"
-        time.sleep(8 * (attempt + 1))
+        if not patience:
+            time.sleep(8 * (attempt + 1))
     raise RuntimeError(f"Gemini недоступен: {last}")
 
 
@@ -142,15 +155,16 @@ def upload_file(path: Path, mime: str = "video/mp4") -> dict:
     raise RuntimeError("Gemini не обработал видео вовремя")
 
 
-def video_part(proxy: Path) -> dict:
-    if proxy.stat().st_size < 15 * 1024 * 1024:
+def video_part(proxy: Path, force_upload: bool = False) -> dict:
+    if not force_upload and proxy.stat().st_size < 15 * 1024 * 1024:
         return {"inline_data": {"mime_type": "video/mp4", "data": base64.b64encode(proxy.read_bytes()).decode()}}
     f = upload_file(proxy)
     return {"file_data": {"mime_type": "video/mp4", "file_uri": f["uri"]}}
 
 
 def analyse(proxy: Path, transcript: str, duration: float, *, streamer: str | None, cam_hint: dict | None,
-            source_title: str | None, wish: str | None = None, previous: dict | None = None) -> dict:
+            source_title: str | None, wish: str | None = None, previous: dict | None = None,
+            brief: dict | None = None) -> dict:
     hint = "none found by the detector"
     if cam_hint and cam_hint.get("present"):
         hint = f"detector thinks the webcam is at normalised box {cam_hint.get('norm')} (confirm or correct)"
@@ -172,9 +186,15 @@ EDIT PLAN:
   Never aim at the webcam overlay area.
 - punch_words: transcript indices of the punchline words (they get coloured).
 - shouts: 2-5 short pop-up words at peak moments (times in clip seconds).
-- hook_text: the big title on screen for the first 3 s. It must create curiosity without spoiling.
+- hook_text: the big title on screen for the first 3 s. It must tell the SITUATION in plain words
+  (e.g. "SPEED TRIES TO STEAL A JET") so the viewer instantly knows what to watch for, and create curiosity
+  without spoiling the outcome.
 - explanation_ru: the owner is not a video editor — explain your edit in simple Russian.
 """
+    if brief:
+        prompt += ("\nSCOUT BRIEF (another AI watched the whole stream and picked this moment):\n"
+                   f"- what happens: {brief.get('what_ru', '')}\n- situation: {brief.get('context_en', '')}\n"
+                   f"- why it works: {brief.get('why_ru', '')}\nKeep this whole story readable.\n")
     if wish:
         prompt += f"\nTHE OWNER ASKED FOR A RE-EDIT. Their wish (Russian, follow it): «{wish}»\n"
     if previous:

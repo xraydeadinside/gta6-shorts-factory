@@ -8,10 +8,10 @@ export const STATUS_RU = {
 };
 
 export const DEFAULT_STYLE = {
-  cam_height: 0.36, max_len: 58, min_len: 12, caption_words: 2, caption_size: 100,
+  cam_height: 0.36, max_len: 58, min_len: 20, caption_words: 2, caption_size: 100,
   caption_color: "#FFFFFF", punch_color: "#FFE600", title_color: "#FFFFFF", title_accent: "#FFE600",
   title_seconds: 3.0, zoom_strength: 1.0, react_zoom: 1.18, shouts: true, whoosh: true, whoosh_volume: 0.35,
-  progress_bar: true, progress_color: "#FFE600", watermark: true, lufs: -14,
+  watermark: true, lufs: -14,
 };
 
 export function esc(s) {
@@ -159,7 +159,7 @@ export const HELP = [
   "👋 <b>Фабрика шортсов GTA 6</b>",
   "",
   "/clip ссылка — смонтировать момент (клип Twitch, VOD с таймкодом ?t=1h2m3s, YouTube)",
-  "/vod ссылка — найти лучшие моменты записи по всплескам чата",
+  "/vod ссылка — ИИ смотрит запись целиком и монтирует лучшие истории",
   "/status — что сейчас в работе",
   "/login — ссылка на веб-панель для ноутбука",
   "/cancel — отменить ожидание ввода",

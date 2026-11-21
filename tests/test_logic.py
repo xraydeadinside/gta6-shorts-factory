@@ -200,3 +200,23 @@ def test_chat_spikes_weighted_samples():
     msgs += [(1800 + i * 0.05, "LMAO", 40.0) for i in range(20)]          # page filled in 1 s at 30:00
     s = find_spikes(msgs, top=2)
     assert 1790 <= s[0]["peak"] <= 1815 and s[0]["kind"] == "funny"
+
+
+def test_scout_rank_prefers_score_no_overlap():
+    from engine import scout
+    cands = [
+        {"start": 100, "end": 140, "score": 7},
+        {"start": 120, "end": 160, "score": 9},      # overlaps the first, better
+        {"start": 900, "end": 930, "score": 7},      # chat spike inside -> bonus
+        {"start": 2000, "end": 2030, "score": 4},    # too weak
+        {"start": 3000, "end": 3040, "score": 6},
+    ]
+    best = scout.rank(cands, [{"peak": 925, "score": 2.0}], top=3)
+    assert [m["start"] for m in best] == [120, 900, 3000]
+
+
+def test_scout_chat_hint_is_relative_to_piece():
+    from engine import scout
+    hint = scout.chat_hint_for([{"peak": 1900, "score": 2.5}, {"peak": 50, "score": 3}], 1800, 3600)
+    assert "100s" in hint and "x2.5" in hint and "50s" not in hint
+    assert scout.chat_hint_for([], 0, 1800) == ""

@@ -19,6 +19,17 @@ from .util import config, probe, style as make_style
 WORK = Path("work")
 
 
+def _brief(job: dict) -> dict | None:
+    """What the scout saw in the stream (set for moments found by /vod)."""
+    raw = job.get("brief")
+    if not raw:
+        return None
+    try:
+        return raw if isinstance(raw, dict) else json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def render_job(job: dict, w: Worker) -> dict:
     jid = job["id"]
     st = make_style(job.get("style") or {})
@@ -54,7 +65,7 @@ def render_job(job: dict, w: Worker) -> dict:
         try:
             ai = brain.analyse(proxy, numbered(words), dur, streamer=meta.get("streamer"), cam_hint=cam,
                                source_title=meta.get("title"), wish=job.get("wish"),
-                               previous=prev.get("ai") if job.get("wish") else None)
+                               previous=prev.get("ai") if job.get("wish") else None, brief=_brief(job))
         except Exception as e:  # noqa: BLE001 - AI down: still make a decent short
             ai = {"_error": str(e), "parts": [], "score": 0, "titles": [], "punch_words": [], "shouts": [],
                   "hook_text": "WAIT FOR IT", "explanation_ru": "ИИ был недоступен — смонтировал по самому громкому моменту.",
@@ -136,32 +147,55 @@ def render_job(job: dict, w: Worker) -> dict:
 
 
 def vod_job(job: dict, w: Worker) -> dict:
-    from .vod_chat import fetch_chat, find_spikes
+    """The AI watches the whole stream and picks complete stories; each becomes its own render job."""
+    from . import scout
     jid = job["id"]
     link = fetch.parse_url(job["url"])
     if link["kind"] != "twitch_vod":
         raise fetch.UserError("Для /vod нужна ссылка на запись Twitch: twitch.tv/videos/…")
-    w.stage(jid, "💬 Читаю чат записи")
-    duration = None
-    try:
-        import yt_dlp
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
-            duration = float(ydl.extract_info(link["url"].split("?")[0], download=False).get("duration") or 0) or None
-    except Exception as e:  # noqa: BLE001 - chat is still read, just sequentially
-        print(f"vod duration unknown: {e}")
-    msgs = fetch_chat(link["url"], link["id"], duration)
-    if not msgs:
-        raise fetch.UserError("Не удалось прочитать чат этой записи.")
-    top = int((config().get("vod") or {}).get("top_moments", 3))
-    spikes = find_spikes(msgs, top=top)
-    if not spikes:
-        raise fetch.UserError("В чате нет заметных всплесков — ярких моментов не нашёл.")
     base = link["url"].split("?")[0]
-    moments = [{"url": f"{base}?t={int(s['peak'])}s", "start": s["start"], "end": s["end"],
-                "note": f"всплеск чата x{s['score']} ({'смешно' if s['kind'] == 'funny' else 'хайп'})"}
-               for s in spikes]
+    wd = WORK / str(jid)
+    wd.mkdir(parents=True, exist_ok=True)
+
+    import yt_dlp
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True}) as ydl:
+            info = ydl.extract_info(base, download=False)
+    except Exception as e:  # noqa: BLE001
+        raise fetch.UserError(f"Не открыл запись (удалена или только для подписчиков?): {str(e)[:200]}") from e
+    duration = float(info.get("duration") or 0)
+    streamer = (info.get("uploader_id") or info.get("uploader") or "").lower() or None
+    chat = scout.chat_in_background(base, link["id"], duration)
+
+    w.stage(jid, f"⬇️ Скачиваю запись ({scout.hms(duration)}) в низком качестве")
+    src = scout.download_low(base, wd / "vod_low")
+    duration = scout.vod_length(src) or duration
+    chat["thread"].join(timeout=600)
+    spikes = chat["spikes"]
+
+    cands, problems = scout.watch(src, duration, wd, streamer=streamer, title=info.get("title"), spikes=spikes,
+                                  progress=lambda s: w.stage(jid, s))
+    top = int((config().get("vod") or {}).get("top_moments", 4))
+    best = scout.rank(cands, spikes, top)
+    how = "ИИ посмотрел стрим"
+    if not best and spikes:  # the AI could not watch (limits) -> old chat method, so the owner still gets something
+        how = "ИИ не смог посмотреть стрим — взял всплески чата"
+        best = [{"start": s["start"], "end": s["end"], "score": 0, "kind": s["kind"], "context_en": "",
+                 "title_en": "", "what_ru": f"всплеск чата x{s['score']}", "why_ru": ""} for s in spikes[:top]]
+    if not best:
+        extra = f" Проблемы: {problems[0]}" if problems else ""
+        raise fetch.UserError("Не нашёл в этой записи законченных смешных или безумных историй." + extra)
+
+    moments = []
+    for m in best:
+        a, b = max(0.0, m["start"] - 3), min(duration, m["end"] + 3)
+        brief = {k: m.get(k) for k in ("what_ru", "why_ru", "context_en", "title_en", "kind", "score")}
+        note = f"{m.get('what_ru', '')} · оценка {m.get('score', 0)}/10 · {scout.hms(a)}"
+        moments.append({"url": f"{base}?t={int(a)}s", "start": a, "end": b, "note": note[:300],
+                        "brief": json.dumps(brief, ensure_ascii=False)})
     w.post("/hook/spawn", {"job_id": jid, "moments": moments})
-    return {"moments": moments, "messages": len(msgs)}
+    return {"moments": moments, "candidates": len(cands), "how": how, "problems": problems,
+            "chat_spikes": len(spikes), "duration": duration}
 
 
 def upload_job(job: dict, w: Worker) -> dict:

@@ -1,5 +1,5 @@
 """Picture: build every 1080x1920 frame (webcam on top, moving game camera below, reaction close-ups,
-progress bar), then encode with ffmpeg and burn the ASS text on top.
+no progress bar), then encode with ffmpeg and burn the ASS text on top.
 
 Frames are produced in Python/OpenCV so the virtual camera can change zoom smoothly per frame,
 which plain ffmpeg crop filters cannot do reliably.
@@ -107,18 +107,8 @@ def render_frames(src: Path, tl: list[dict], moves: list[Move], cam: dict, style
     has_cam = bool(cam and cam.get("present"))
     box = tuple(cam["box"]) if has_cam else None
     face = tuple(cam.get("face") or (0.5, 0.45)) if has_cam else (0.5, 0.5)
-    bar_on = bool(style.get("progress_bar", True))
-    bar_col = np.array(hex_to_bgr(style.get("progress_color", "#FFE600")), np.uint8)
-    frame_no = 0
-    n_total = int(round(total * FPS))
 
     def finish(canvas: np.ndarray) -> np.ndarray:
-        nonlocal frame_no
-        if bar_on:
-            fill = int(W * min(1.0, (frame_no + 1) / max(1, n_total)))
-            canvas[H - 16:H] = (canvas[H - 16:H] * 0.35).astype(np.uint8)
-            canvas[H - 14:H - 2, :fill] = bar_col
-        frame_no += 1
         return canvas
 
     if intro is not None and intro_len > 0:

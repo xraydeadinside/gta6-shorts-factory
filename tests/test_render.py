@@ -85,8 +85,8 @@ def test_full_render(source, tmp_path):
     # reaction close-up (output 6.5..7.5 s): the webcam fills the big top area
     f3 = _frame(out, 7.0)
     assert _green_share(f3[100:compose.REACT_CAM_H - 100]) > 0.25
-    # progress bar grows
-    assert _bar(_frame(out, 1.0)) < _bar(_frame(out, 8.0))
+    # no progress bar at the bottom
+    assert _bar(_frame(out, 8.0)) < 50
 
 
 def _frame(video, t):

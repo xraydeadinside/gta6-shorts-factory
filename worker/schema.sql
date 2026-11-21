@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   start REAL,
   end_t REAL,
   note TEXT,
+  brief TEXT,                      -- what the scout AI saw (JSON), for /vod moments
   wish TEXT,
   intro_file_id TEXT,
   reuse_plan INTEGER DEFAULT 0,

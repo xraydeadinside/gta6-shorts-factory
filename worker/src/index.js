@@ -173,14 +173,14 @@ async function statusText(env) {
 }
 
 // ------------------------------------------------------------------ jobs
-async function newJob(env, kind, url, { start = null, end = null, note = null, parent = null, silent = false } = {}) {
+async function newJob(env, kind, url, { start = null, end = null, note = null, brief = null, parent = null, silent = false } = {}) {
   const ins = await env.DB.prepare(
-    "INSERT INTO jobs (kind, url, status, stage, created_at, updated_at, parent_id, start, end_t, note) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)")
-    .bind(kind === "vod" ? "vod" : "render", url, "в очереди", now(), now(), parent, start, end, note).run();
+    "INSERT INTO jobs (kind, url, status, stage, created_at, updated_at, parent_id, start, end_t, note, brief) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(kind === "vod" ? "vod" : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
   const id = ins.meta.last_row_id;
   if (!silent) {
     const m = await say(env, kind === "vod"
-      ? `✅ Принял запись #${id}. Читаю чат и ищу лучшие моменты — пришлю шортсы.`
+      ? `✅ Принял запись #${id}. ИИ посмотрит стрим целиком и выберет законченные истории — это 15–40 минут, пришлю шортсы.`
       : `✅ Принял #${id}. Монтирую — пришлю готовый шортс через ~4–7 минут.`);
     if (m.result) { await updateJob(env, id, { ack_msg_id: m.result.message_id }); await remember(env, m.result.message_id, id); }
   }
@@ -378,7 +378,7 @@ async function hook(req, env, ctx, p, origin) {
         const ex = await env.DB.prepare("SELECT id FROM jobs WHERE url = ?").bind(mo.url).first();
         if (ex) continue;
       }
-      await newJob(env, "render", mo.url, { start: mo.start ?? null, end: mo.end ?? null, note: mo.note || null, parent: job ? job.id : null, silent: true });
+      await newJob(env, "render", mo.url, { start: mo.start ?? null, end: mo.end ?? null, note: mo.note || null, brief: mo.brief ? String(mo.brief).slice(0, 2000) : null, parent: job ? job.id : null, silent: true });
       made++;
     }
     if (made) await say(env, `🔎 ${job ? `#${job.id}: ` : ""}нашёл ${made} момент(ов). Монтирую, пришлю каждый отдельно.`);
@@ -399,6 +399,11 @@ async function hook(req, env, ctx, p, origin) {
   if (p === "/hook/done") {
     if (body.kind === "vod") {
       await updateJob(env, job.id, { status: "done", stage: "готово", result: body.result });
+      const r = body.result || {};
+      const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("
+");
+      if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:
+${lines}`);
       return json({ ok: true });
     }
     if (body.kind === "upload") {

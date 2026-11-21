@@ -16,7 +16,7 @@ download:
 style:                     # значения по умолчанию
   cam_height: 0.36         # доля высоты кадра под вебку
   max_len: 58              # секунд, итоговый шортс
-  min_len: 12
+  min_len: 20              # короче история обычно непонятна
   caption_words: 2         # 1 или 2 слова в субтитре
   caption_size: 100
   caption_color: "#FFFFFF"
@@ -29,13 +29,14 @@ style:                     # значения по умолчанию
   shouts: true
   whoosh: true
   whoosh_volume: 0.35
-  progress_bar: true
-  progress_color: "#FFE600"
   watermark: true
   lufs: -14
 
 vod:
-  top_moments: 3           # сколько лучших моментов из записи монтировать
+  top_moments: 4           # сколько лучших историй из записи монтировать
+
+scout:                     # ИИ смотрит запись целиком (вместо поиска по чату)
+  piece_minutes: 30        # кусками по столько минут (меньше = меньше упираемся в лимит Gemini)
 
 twitch_auto:               # автопоиск клипов через Twitch API — ВЫКЛЮЧЕН
   enabled: false

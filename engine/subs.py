@@ -159,7 +159,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ev.append(f"Dialogue: 4,{ass_time(t)},{ass_time(min(total, t + 0.9))},Shout,,0,0,0,,"
                       f"{{\\an5\\pos({x},{y}){anim}}}{esc(text)}")
 
-    # --- credit: bottom-left, just above the progress bar (never on the face)
+    # --- credit: bottom-left, bottom edge (never on the face)
     if style.get("watermark", True) and streamer:
         ev.append(f"Dialogue: 1,{ass_time(0)},{ass_time(total)},Credit,,0,0,0,,"
                   f"{{\\an1\\pos(26,{H - 30})\\alpha&H30&}}twitch.tv/{esc(streamer)}")
