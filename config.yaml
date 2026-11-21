@@ -29,6 +29,8 @@ style:                     # значения по умолчанию
   shouts: true
   whoosh: true
   whoosh_volume: 0.35
+  sfx: true               # звуковые эффекты: поп на тексте, удар на панчлайне, нарастание, свиш на наездах
+  sfx_volume: 1.0          # 0.5 тише … 1.5 громче
   watermark: true
   lufs: -14
 

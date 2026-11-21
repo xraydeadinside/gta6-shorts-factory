@@ -108,3 +108,12 @@ def _bar(frame):
 def test_whoosh_is_synthetic_and_short():
     w = audio.whoosh()
     assert w.shape[1] == 2 and 0.3 < len(w) / audio.SR < 0.5 and np.abs(w).max() <= 1.0
+
+
+def test_sfx_sounds_are_short_and_clean():
+    from engine import sfx
+    for k in sfx.KINDS:
+        y = sfx.render(k)
+        assert y.ndim == 2 and y.shape[1] == 2
+        assert 0.05 < len(y) / sfx.SR < 1.5
+        assert np.isfinite(y).all() and np.abs(y).max() <= 1.0 + 1e-6

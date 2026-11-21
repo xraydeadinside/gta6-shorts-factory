@@ -39,6 +39,7 @@ def style(overrides: dict | None = None) -> dict:
     s["zoom_strength"] = min(1.6, max(0.3, float(s["zoom_strength"])))
     s["cam_height"] = min(0.5, max(0.25, float(s["cam_height"])))
     s["max_len"] = min(170.0, max(10.0, float(s["max_len"])))
+    s["sfx_volume"] = min(2.0, max(0.0, float(s.get("sfx_volume", 1.0))))
     return s
 
 

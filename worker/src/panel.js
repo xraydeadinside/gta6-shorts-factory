@@ -50,7 +50,7 @@ dialog{background:var(--card);color:var(--txt);border:1px solid var(--line);bord
 const ST={queued:"⏳ в очереди",working:"⚙️ монтирую",ready:"🟢 готов",published:"✅ опубликован",rejected:"❌ отклонён",failed:"⚠️ ошибка",done:"✔️ готово"};
 const ROLE={hook:"Хук",setup:"Завязка",punchline:"Панчлайн",reaction:"Реакция",payoff:"Развязка"};
 const CAM={push:"наезд",pan:"проезд",whip:"рывок",hold:"держим кадр",cut:"склейка"};
-const LBL={cam_height:"Доля кадра под вебку (0.25–0.5)",max_len:"Макс. длина, сек",min_len:"Мин. длина, сек",caption_words:"Слов в субтитре (1 или 2)",caption_size:"Размер субтитров",caption_color:"Цвет субтитров",punch_color:"Цвет панчлайна",title_color:"Цвет заголовка",title_accent:"Акцент заголовка",title_seconds:"Заголовок, сек",zoom_strength:"Сила наездов (0.5–1.5)",react_zoom:"Зум на реакции",shouts:"Всплывающие выкрики",whoosh:"«Вжух» на склейках",whoosh_volume:"Громкость вжуха",watermark:"Подпись twitch.tv/стример",lufs:"Громкость, LUFS"};
+const LBL={cam_height:"Доля кадра под вебку (0.25–0.5)",max_len:"Макс. длина, сек",min_len:"Мин. длина, сек",caption_words:"Слов в субтитре (1 или 2)",caption_size:"Размер субтитров",caption_color:"Цвет субтитров",punch_color:"Цвет панчлайна",title_color:"Цвет заголовка",title_accent:"Акцент заголовка",title_seconds:"Заголовок, сек",zoom_strength:"Сила наездов (0.5–1.5)",react_zoom:"Зум на реакции",shouts:"Всплывающие выкрики",whoosh:"«Вжух» на склейках",whoosh_volume:"Громкость вжуха",sfx:"Звуковые эффекты",sfx_volume:"Громкость эффектов (0.5–1.5)",watermark:"Подпись twitch.tv/стример",lufs:"Громкость, LUFS"};
 let jobs=[],cur=null,timer=null;
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));

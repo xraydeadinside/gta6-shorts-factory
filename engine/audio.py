@@ -1,4 +1,4 @@
-"""Sound: cut the parts, add synthesized whooshes on cuts (no copyright), normalise to -14 LUFS."""
+"""Sound: cut the parts, add synthesized whooshes and sound effects (no copyright), normalise to -14 LUFS."""
 from __future__ import annotations
 
 import json
@@ -61,7 +61,8 @@ def whoosh(seconds: float = 0.38, seed: int = 1) -> np.ndarray:
 
 
 def build(src: Path, tl: list[dict], cuts: list[float], out: Path, *, style: dict,
-          intro: Path | None = None, intro_len: float = 0.0, total: float | None = None) -> Path:
+          intro: Path | None = None, intro_len: float = 0.0, total: float | None = None,
+          events: list[dict] | None = None) -> Path:
     """Assemble the soundtrack for the timeline, add whooshes, normalise loudness."""
     pieces = []
     if intro is not None and intro_len > 0:
@@ -96,6 +97,10 @@ def build(src: Path, tl: list[dict], cuts: list[float], out: Path, *, style: dic
             end = min(len(mix), start + len(w))
             if end > start:
                 mix[start:end] += w[: end - start]
+
+    if events and style.get("sfx", True):
+        from . import sfx
+        sfx.mix_into(mix, events, float(style.get("sfx_volume", 1.0)))
 
     raw = out.with_name(out.stem + "_raw.wav")
     write_wav(raw, mix)

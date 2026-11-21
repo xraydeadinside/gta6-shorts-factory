@@ -12,7 +12,7 @@ import time
 import traceback
 from pathlib import Path
 
-from . import audio, brain, camera, compose, fetch, plan, seo, subs, webcam
+from . import audio, brain, camera, compose, fetch, plan, seo, sfx, subs, webcam
 from .notify import Worker, get_file, send_text, send_video
 from .util import config, probe, style as make_style
 
@@ -113,7 +113,18 @@ def render_job(job: dict, w: Worker) -> dict:
                          title=ai.get("hook_text") or "", title_accent_word=ai.get("hook_accent"),
                          shouts=shouts, streamer=streamer, style=st,
                          cam_h=cam_h if cam["present"] else 300, layouts=layouts, total=total)
-    snd = audio.build(src, tl, cuts, wd / "audio.wav", style=st, intro=intro_path, intro_len=intro_len, total=total)
+    punch = set(ai.get("punch_words") or [])
+    punch_times, last = [], -9.0
+    for wo in words_out:  # first word of each punchline (a new punchline starts after a 1 s gap)
+        if wo["i"] in punch:
+            if wo["s"] - last > 1.0:
+                punch_times.append(wo["s"])
+            last = wo["s"]
+    events = sfx.plan_events(tl=tl, total=total, intro_len=intro_len,
+                             title_on=bool(subs.renderable(ai.get("hook_text") or "")),
+                             shouts=shouts, punch_times=punch_times, ai_sfx=ai.get("sfx") or [])
+    snd = audio.build(src, tl, cuts, wd / "audio.wav", style=st, intro=intro_path, intro_len=intro_len,
+                      total=total, events=events)
     out = wd / f"short_{jid}.mp4"
     compose.encode(compose.render_frames(src, tl, moves, cam, st, total, intro_path, intro_len), snd, ass, out, total)
     thumb = compose.thumbnail(out, wd / "thumb.jpg", min(1.2, total / 2))
@@ -143,6 +154,7 @@ def render_job(job: dict, w: Worker) -> dict:
         "duration": round(total, 2), "lufs": round(lufs, 1), "size_mb": round(out.stat().st_size / 1048576, 1),
         "video_file_id": sent["file_id"], "video_msg_id": sent["message_id"],
         "render_seconds": int(time.time() - t0),
+        "sfx": [f"{e['t']:.1f}s {e['kind']}" for e in events],
     }
 
 

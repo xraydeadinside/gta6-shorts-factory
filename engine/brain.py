@@ -57,6 +57,11 @@ SCHEMA = {
         "punch_words": {"type": "ARRAY", "items": {"type": "INTEGER"},
                         "description": "transcript word indices of the punchline words to highlight"},
         "hook_text": {"type": "STRING", "description": "SCREAMING on-screen title, 2-5 words, English, caps"},
+        "sfx": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "t": {"type": "NUMBER", "description": "clip seconds of the game action"},
+            "kind": {"type": "STRING", "enum": ["impact", "riser", "glitch", "swish", "pop"]}},
+            "required": ["t", "kind"]},
+            "description": "0-4 sound effects on GAME ACTIONS (crash, explosion, hit, fall, absurd physics)"},
         "hook_accent": {"type": "STRING", "description": "one word of hook_text to colour"},
         "shouts": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
             "t": {"type": "NUMBER", "description": "source seconds"},
@@ -186,6 +191,9 @@ EDIT PLAN:
   Never aim at the webcam overlay area.
 - punch_words: transcript indices of the punchline words (they get coloured).
 - shouts: 2-5 short pop-up words at peak moments (times in clip seconds).
+- sfx: 0-4 sound effects on what happens IN THE GAME: "impact" on a crash / explosion / hit / hard landing,
+  "glitch" on absurd broken physics, "riser" where tension peaks (t = the peak), "swish" on something flying past.
+  Text pop-ups and the punchline already get sounds automatically — do not duplicate them. Fewer is better.
 - hook_text: the big title on screen for the first 3 s. It must tell the SITUATION in plain words
   (e.g. "SPEED TRIES TO STEAL A JET") so the viewer instantly knows what to watch for, and create curiosity
   without spoiling the outcome.

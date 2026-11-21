@@ -220,3 +220,21 @@ def test_scout_chat_hint_is_relative_to_piece():
     hint = scout.chat_hint_for([{"peak": 1900, "score": 2.5}, {"peak": 50, "score": 3}], 1800, 3600)
     assert "100s" in hint and "x2.5" in hint and "50s" not in hint
     assert scout.chat_hint_for([], 0, 1800) == ""
+
+
+def test_sfx_plan_no_pileup_and_on_events():
+    from engine import sfx
+    tl = [{"a": 0, "b": 4, "oa": 0, "ob": 4, "shot": "game", "camera": "push"},
+          {"a": 10, "b": 15, "oa": 4, "ob": 9, "shot": "game", "camera": "whip"},
+          {"a": 15, "b": 16, "oa": 9, "ob": 10, "shot": "react", "camera": "hold"}]
+    ev = sfx.plan_events(tl=tl, total=10, intro_len=0, title_on=True,
+                         shouts=[{"t": 4.05, "text": "NO WAY"}], punch_times=[6.0],
+                         ai_sfx=[{"t": 12.0, "kind": "impact"}, {"t": 12.1, "kind": "glitch"}, {"t": 99, "kind": "impact"}])
+    kinds = [(round(e["t"], 2), e["kind"]) for e in ev]
+    assert (0.02, "pop") in kinds and (6.0, "impact") in kinds and (6.0, "riser") in kinds
+    assert (9, "impact") in kinds                          # reaction close-up hits
+    assert any(k == "impact" and abs(t - 6.0) < 0.01 for t, k in kinds)
+    # never two non-riser effects closer than MIN_GAP
+    hits = sorted(e["t"] for e in ev if e["kind"] != "riser")
+    assert all(b - a >= sfx.MIN_GAP - 1e-9 for a, b in zip(hits, hits[1:]))
+    assert all(0 <= e["t"] < 10 for e in ev)

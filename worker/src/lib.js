@@ -10,7 +10,7 @@ export const STATUS_RU = {
 export const DEFAULT_STYLE = {
   cam_height: 0.36, max_len: 58, min_len: 20, caption_words: 2, caption_size: 100,
   caption_color: "#FFFFFF", punch_color: "#FFE600", title_color: "#FFFFFF", title_accent: "#FFE600",
-  title_seconds: 3.0, zoom_strength: 1.0, react_zoom: 1.18, shouts: true, whoosh: true, whoosh_volume: 0.35,
+  title_seconds: 3.0, zoom_strength: 1.0, react_zoom: 1.18, shouts: true, whoosh: true, whoosh_volume: 0.35, sfx: true, sfx_volume: 1.0,
   watermark: true, lufs: -14,
 };
 
