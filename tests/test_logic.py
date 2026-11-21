@@ -192,3 +192,11 @@ def test_chat_spikes_busy_chat():
     s = find_spikes(msgs, top=3)
     assert len(s) == 3
     assert any(4980 <= x["peak"] <= 5030 for x in s)
+
+
+def test_chat_spikes_weighted_samples():
+    """Sampled chat: (t, text, weight) where weight says how many real messages one read message stands for."""
+    msgs = [(t * 5.0 + 1, "hi", 1.0) for t in range(720)]                 # calm hour, sampled every 5 s
+    msgs += [(1800 + i * 0.05, "LMAO", 40.0) for i in range(20)]          # page filled in 1 s at 30:00
+    s = find_spikes(msgs, top=2)
+    assert 1790 <= s[0]["peak"] <= 1815 and s[0]["kind"] == "funny"

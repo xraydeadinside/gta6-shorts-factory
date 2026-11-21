@@ -61,25 +61,58 @@ def _fetch_range(video_id: str, a: float, b: float, max_pages: int = 4000) -> li
     return out
 
 
-def fetch_chat_gql(video_id: str, duration: float | None = None, workers: int = 12,
-                   piece: float = 900.0) -> list[tuple[float, str]]:
-    """Whole VOD chat. Long VODs are read in parallel 15-minute pieces (busy chats have 100k+ messages)."""
+def _sample(s: requests.Session, video_id: str, o: float, step: float) -> list[tuple[float, str, float]]:
+    """One page of chat starting at offset o, limited to [o, o+step).
+
+    Busy chats fill a page in under a second, so each kept message gets a weight = step / covered time:
+    the bucket then counts as many messages as the chat really had (an estimate of chat speed)."""
+    comments = _page(s, video_id, None, o)
+    rows = []
+    for e in comments.get("edges") or []:
+        n = e.get("node") or {}
+        t = float(n.get("contentOffsetSeconds") or 0)
+        text = "".join(f.get("text", "") for f in ((n.get("message") or {}).get("fragments") or []))
+        rows.append((t, text))
+    rows.sort(key=lambda r: r[0])
+    kept = [r for r in rows if o <= r[0] < o + step]
+    if not kept:
+        return []
+    full = len(kept) == len(rows) and rows and rows[-1][0] < o + step and comments.get("pageInfo", {}).get("hasNextPage")
+    covered = (kept[-1][0] - o) if full else step
+    w = step / max(covered, 0.5)
+    return [(t, text, w) for t, text in kept]
+
+
+def fetch_chat_gql(video_id: str, duration: float | None = None, workers: int = 16,
+                   step: float = 5.0) -> list[tuple[float, str, float]]:
+    """Chat of the whole VOD, sampled every `step` seconds in parallel (Twitch no longer pages by cursor)."""
     if not duration:
-        return _fetch_range(video_id, 0, 10 ** 9, max_pages=20000)
-    ranges = [(float(a), min(duration + 60, a + piece)) for a in range(0, int(duration) + 1, int(piece))]
-    msgs: list[tuple[float, str]] = []
+        return [(t, x, 1.0) for t, x in _fetch_range(video_id, 0, 10 ** 9, max_pages=20000)]
+    step = max(step, duration / 4000)  # at most ~4000 requests
+    offsets = [i * step for i in range(int(duration // step) + 1)]
+    local = __import__("threading").local()
+
+    def one(o: float):
+        if not hasattr(local, "s"):
+            local.s = requests.Session()
+            local.s.headers.update({"Client-Id": PUBLIC_CLIENT_ID, "Content-Type": "application/json"})
+        return _sample(local.s, video_id, o, step)
+
+    msgs: list[tuple[float, str, float]] = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for part in ex.map(lambda r: _fetch_range(video_id, *r), ranges):
+        for part in ex.map(one, offsets):
             msgs.extend(part)
     msgs.sort(key=lambda m: m[0])
     return msgs
 
 
-def fetch_chat(vod_url: str, video_id: str | None, duration: float | None = None) -> list[tuple[float, str]]:
+def fetch_chat(vod_url: str, video_id: str | None, duration: float | None = None) -> list[tuple]:
     if video_id:
         try:
             msgs = fetch_chat_gql(video_id, duration)
-            print(f"chat (gql): {len(msgs)} messages, up to {msgs[-1][0] if msgs else 0:.0f}s of {duration}s")
+            est = sum(m[2] for m in msgs)
+            print(f"chat (gql): {len(msgs)} messages read (~{est:.0f} estimated), "
+                  f"up to {msgs[-1][0] if msgs else 0:.0f}s of {duration}s")
             if msgs:
                 return msgs
         except Exception as e:  # noqa: BLE001 - fall back to the library
@@ -94,7 +127,7 @@ def fetch_chat(vod_url: str, video_id: str | None, duration: float | None = None
     return out
 
 
-def find_spikes(msgs: list[tuple[float, str]], bucket: float = 10.0, top: int = 3,
+def find_spikes(msgs: list[tuple], bucket: float = 10.0, top: int = 3,
                 min_gap: float = 90.0, factor: float = 1.6, window: int = 30) -> list[dict]:
     """[{start, end, peak, score, kind}] best first.
 
@@ -104,18 +137,20 @@ def find_spikes(msgs: list[tuple[float, str]], bucket: float = 10.0, top: int = 
     """
     if not msgs:
         return []
-    n = int(max(t for t, _ in msgs) // bucket) + 1
+    n = int(max(m[0] for m in msgs) // bucket) + 1
     score = [0.0] * n
-    laughs = [0] * n
-    for t, text in msgs:
+    laughs = [0.0] * n
+    for m in msgs:
+        t, text = m[0], m[1]
+        k = m[2] if len(m) > 2 else 1.0  # sampled chat: one read message stands for k real ones
         i = int(t // bucket)
         w = 1.0
         if LAUGH.search(text):
             w += 1.5
-            laughs[i] += 1
+            laughs[i] += k
         if HYPE.search(text):
             w += 1.0
-        score[i] += w
+        score[i] += w * k
     sm = [sum(score[max(0, i - 1):i + 2]) / len(score[max(0, i - 1):i + 2]) for i in range(n)]
     glob = statistics.median([s for s in sm if s > 0] or [1.0])
     ratio = []
