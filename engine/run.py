@@ -85,7 +85,12 @@ def render_job(job: dict, w: Worker) -> dict:
     elif cam["present"] and wc.get("present") is False and not cam.get("how", "").startswith("лицо"):
         cam = {"present": False, "box": None, "face": None, "how": "ИИ: вебки нет"}
 
-    streamer = (meta.get("streamer") or (ai.get("streamer") or "").strip().lstrip("@").lower() or None)
+    ai_streamer = (ai.get("streamer") or "").strip().lstrip("@").lower() or None
+    if meta.get("kind") == "youtube":
+        # a YouTube uploader is often a fan re-upload channel, not the streamer: credit whom the AI recognised
+        streamer = ai_streamer
+    else:
+        streamer = meta.get("streamer") or ai_streamer
     parts = plan.clean_parts(ai.get("parts") or [], dur, st, cam["present"])
     if not parts or sum(p["b"] - p["a"] for p in parts) < 3:
         parts = plan.fallback_plan(dur, audio.loudest_moment(src), cam["present"], st)

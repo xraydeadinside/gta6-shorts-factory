@@ -38,7 +38,7 @@ SCHEMA = {
     "properties": {
         "score": {"type": "INTEGER", "description": "1-10, how good this moment is for a viral Short"},
         "verdict_ru": {"type": "STRING", "description": "one short sentence in Russian: worth it or not and why"},
-        "streamer": {"type": "STRING", "description": "twitch login of the streamer if visible/said, else empty"},
+        "streamer": {"type": "STRING", "description": "twitch login of the streamer seen in the video (e.g. ishowspeed, kaicenat), else empty. Never a YouTube re-upload channel name"},
         "webcam": {"type": "OBJECT", "properties": {
             "present": {"type": "BOOLEAN"},
             "box": {"type": "ARRAY", "items": {"type": "NUMBER"},
