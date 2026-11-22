@@ -197,7 +197,7 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
 }
 
 function isYouTube(u) {
-  return /^(https?://)?((www|m|music).)?(youtube.com|youtu.be)//i.test(String(u || "").trim());
+  return /^(https?:\/\/)?((www|m|music)\.)?(youtube\.com|youtu\.be)\//i.test(String(u || "").trim());
 }
 
 async function dispatchOrFail(env, kind, id) {
