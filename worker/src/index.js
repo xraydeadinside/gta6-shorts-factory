@@ -147,6 +147,30 @@ async function onCommand(env, { cmd, arg }, origin) {
     if (!u) return say(env, `Пришли так: <code>/${cmd} https://…</code>`);
     return newJob(env, cmd === "vod" ? "vod" : "render", u, { note: arg.replace(u, "").trim() || null });
   }
+  if (cmd === "ref" || cmd === "example") {
+    const u = extractUrl(arg);
+    if (!u) return say(env, "Пришли так: <code>/ref https://youtube.com/…</code> и можно коротко, что нравится");
+    return newJob(env, "ref", u, { note: arg.replace(u, "").trim() || null });
+  }
+  if (cmd === "note") {
+    if (!arg) return say(env, "Пришли так: <code>/note субтитры слишком большие</code>");
+    const notes = (await kvGet(env, "notes")) || [];
+    notes.push({ t: now(), text: arg.slice(0, 2000) });
+    await kvSet(env, "notes", notes.slice(-200));
+    return say(env, `📝 Записал замечание (${notes.length}). Claude прочитает его, когда вернёшься к компьютеру.`);
+  }
+  if (cmd === "refs") {
+    const rows = await env.DB.prepare("SELECT id, url, status, result, note FROM jobs WHERE kind = 'ref' ORDER BY id DESC LIMIT 15").all();
+    const notes = (await kvGet(env, "notes")) || [];
+    const lines = ["📚 <b>Примеры</b>"];
+    for (const j of rows.results || []) {
+      const r = j.result ? JSON.parse(j.result) : {};
+      lines.push(`#${j.id} ${STATUS_RU[j.status] || j.status} · ${esc(r.format || "")} · ${esc((r.title || j.url).slice(0, 60))}`);
+    }
+    if (!(rows.results || []).length) lines.push("Пока нет. Пришли /ref ссылка");
+    lines.push("", `📝 Замечаний: ${notes.length}`);
+    return say(env, lines.join("\n"));
+  }
   if (cmd === "status") return say(env, await statusText(env));
   if (cmd === "cancel") { await kvDel(env, "await"); return say(env, "Ок, отменил."); }
   if (cmd === "login" || cmd === "panel") {
@@ -176,9 +200,9 @@ async function statusText(env) {
 async function newJob(env, kind, url, { start = null, end = null, note = null, brief = null, parent = null, silent = false } = {}) {
   const ins = await env.DB.prepare(
     "INSERT INTO jobs (kind, url, status, stage, created_at, updated_at, parent_id, start, end_t, note, brief) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(kind === "vod" ? "vod" : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
+    .bind(["vod", "ref"].includes(kind) ? kind : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
   const id = ins.meta.last_row_id;
-  if (kind !== "vod" && isYouTube(url)) {
+  if (kind === "render" && isYouTube(url)) {
     await updateJob(env, id, { status: "laptop", stage: "ждёт помощника на ноутбуке" });
     if (!silent) {
       const m = await say(env, `📥 Принял #${id} (YouTube). YouTube не отдаёт видео серверам GitHub, поэтому его скачивает ноутбук: запусти ярлык «Скачать с YouTube» — он скачает кусок и я смонтирую шортс.`);
@@ -187,12 +211,14 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
     return id;
   }
   if (!silent) {
-    const m = await say(env, kind === "vod"
+    const m = await say(env, kind === "ref"
+      ? `📚 Сохранил пример #${id}. ИИ разбирает его стиль (хук, темп, субтитры, вебка, звук) — пришлю разбор через пару минут.`
+      : kind === "vod"
       ? `✅ Принял запись #${id}. ИИ посмотрит стрим целиком и выберет законченные истории — это 15–40 минут, пришлю шортсы.`
       : `✅ Принял #${id}. Монтирую — пришлю готовый шортс через ~4–7 минут.`);
     if (m.result) { await updateJob(env, id, { ack_msg_id: m.result.message_id }); await remember(env, m.result.message_id, id); }
   }
-  await dispatchOrFail(env, kind === "vod" ? "vod" : "render", id);
+  await dispatchOrFail(env, ["vod", "ref"].includes(kind) ? kind : "render", id);
   return id;
 }
 
@@ -441,6 +467,13 @@ async function hook(req, env, ctx, p, origin) {
       const r = body.result || {};
       const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("\n");
       if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:\n${lines}`);
+      return json({ ok: true });
+    }
+    if (body.kind === "ref") {
+      const r = body.result || {};
+      await updateJob(env, job.id, { status: "done", stage: "разобран", result: r });
+      const rules = (r.rules_ru || []).slice(0, 8).map((x) => "• " + esc(x)).join("\n");
+      await say(env, `📚 Пример #${job.id} разобран (${esc(r.format || "")}, ${Math.round(r.duration || 0)} сек):\n<b>${esc(r.title || "")}</b>\n\n${esc(r.summary_ru || "")}\n\n<b>Что взять себе:</b>\n${rules}`);
       return json({ ok: true });
     }
     if (body.kind === "upload") {

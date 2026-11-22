@@ -244,6 +244,14 @@ def main() -> int:
         elif kind == "vod":
             res = vod_job(job, w)
             w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})
+        elif kind == "ref":
+            from .reference import analyse as analyse_ref
+            w.stage(jid, "📚 ИИ разбирает стиль примера")
+            wd = WORK / str(jid)
+            wd.mkdir(parents=True, exist_ok=True)
+            res = analyse_ref(job, wd)
+            res = {k: v for k, v in res.items() if not k.startswith("_")}
+            w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})
         elif kind == "upload":
             res = upload_job(job, w)
             w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})

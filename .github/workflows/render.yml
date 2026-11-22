@@ -3,11 +3,11 @@ name: render
 # Started by the Cloudflare Worker (repository_dispatch) when you send /clip, /vod, press "Перемонтировать" etc.
 on:
   repository_dispatch:
-    types: [render, vod, upload]
+    types: [render, vod, upload, ref]
   workflow_dispatch:
     inputs:
       kind:
-        description: "render | vod | upload"
+        description: "render | vod | upload | ref"
         default: render
       job_id:
         description: "job id from the bot"
