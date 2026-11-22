@@ -169,7 +169,7 @@ def video_part(proxy: Path, force_upload: bool = False) -> dict:
 
 def analyse(proxy: Path, transcript: str, duration: float, *, streamer: str | None, cam_hint: dict | None,
             source_title: str | None, wish: str | None = None, previous: dict | None = None,
-            brief: dict | None = None) -> dict:
+            brief: dict | None = None, min_len: float = 20, max_len: float = 58) -> dict:
     hint = "none found by the detector"
     if cam_hint and cam_hint.get("present"):
         hint = f"detector thinks the webcam is at normalised box {cam_hint.get('norm')} (confirm or correct)"
@@ -184,6 +184,8 @@ EDIT PLAN:
 - Split the clip into beats: hook -> setup -> punchline -> reaction -> payoff (skip roles that do not exist,
   repeat roles if needed). Times are seconds in THIS clip (0..{duration:.1f}), parts in playback order.
 - Remove boring stretches by simply not including them. Each part >= 0.6 s.
+- LENGTH: the parts together must last at least {min(min_len, duration):.0f} s and at most {max_len:.0f} s.
+  If the story is short, keep more setup before it and more reaction after it — never deliver a fragment.
 - shot "game": webcam on top, gameplay below with a virtual camera. shot "react": SHORT (0.6-2 s) big close-up
   of the streamer's face right after a punchline or a big reaction — only if a webcam exists.
 - camera: "push" fast zoom into the action, "pan" glide to where the action moves, "whip" very fast jump to a

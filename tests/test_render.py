@@ -42,7 +42,7 @@ def test_webcam_box_snaps_to_overlay(source):
 
 
 def test_full_render(source, tmp_path):
-    st = style({})
+    st = style({"min_len": 0})  # exact timings of the synthetic edit are checked below
     raw = [
         {"role": "hook", "start": 5.0, "end": 6.5, "shot": "game", "camera": "push", "x": 0.5, "y": 0.6, "zoom": 1.5},
         {"role": "setup", "start": 0.0, "end": 3.0, "shot": "game", "camera": "hold", "x": 0.3, "y": 0.6, "zoom": 1.1},

@@ -58,7 +58,58 @@ def clean_parts(raw: list[dict], duration: float, style: dict, has_cam: bool) ->
     if head:
         head["b"] = min(head["b"], head["a"] + 3.0)  # teaser hook is max 3 s
         fixed.insert(0, head)
-    return _fit_length(fixed, style)
+    return _fit_length(_reach_min(fixed, style, duration), style)
+
+
+def _reach_min(parts: list[dict], style: dict, duration: float) -> list[dict]:
+    """A story shorter than min_len is usually unclear: give back context from the source.
+
+    1) start the first story part earlier (more setup), 2) let the last part run longer (more payoff),
+    3) put back the shortest pieces the AI skipped between parts."""
+    min_len = float(style.get("min_len", 20))
+    total = sum(p["b"] - p["a"] for p in parts)
+    need = min(min_len, duration) - total
+    if need <= 0.05 or not parts:
+        return parts
+    body = [p for p in parts if not (p is parts[0] and p["role"] == "hook" and len(parts) > 1)]
+    first = body[0]
+    if first["shot"] == "react":  # never stretch a close-up: add a game part before it
+        if first["a"] > MIN_PART:
+            add = min(need, first["a"])
+            new = dict(first, role="setup", shot="game", camera="hold", a=round(first["a"] - add, 3),
+                       b=first["a"], note="контекст")
+            parts.insert(parts.index(first), new)
+            need -= add
+    else:
+        add = min(need, first["a"])
+        first["a"] = round(first["a"] - add, 3)
+        need -= add
+    if need > 0.05:
+        last = parts[-1]
+        add = min(need, duration - last["b"])
+        if add > 0:
+            if last["shot"] == "react":
+                parts.append(dict(last, role="payoff", shot="game", camera="hold", a=last["b"],
+                                  b=round(last["b"] + add, 3), note="продолжение"))
+            else:
+                last["b"] = round(last["b"] + add, 3)
+            need -= add
+    if need > 0.05:  # gaps between consecutive forward parts, shortest first
+        idx = [i for i in range(1, len(parts)) if parts[i]["a"] - parts[i - 1]["b"] > 0.05
+               and not (i - 1 == 0 and parts[0]["role"] == "hook")]
+        for i in sorted(idx, key=lambda i: parts[i]["a"] - parts[i - 1]["b"]):
+            if need <= 0.05:
+                break
+            gap = parts[i]["a"] - parts[i - 1]["b"]
+            add = min(gap, need)
+            if parts[i]["shot"] != "react":
+                parts[i]["a"] = round(parts[i]["a"] - add, 3)
+            elif parts[i - 1]["shot"] != "react":
+                parts[i - 1]["b"] = round(parts[i - 1]["b"] + add, 3)
+            else:
+                continue
+            need -= add
+    return parts
 
 
 def _fit_length(parts: list[dict], style: dict) -> list[dict]:

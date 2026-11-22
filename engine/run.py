@@ -65,7 +65,8 @@ def render_job(job: dict, w: Worker) -> dict:
         try:
             ai = brain.analyse(proxy, numbered(words), dur, streamer=meta.get("streamer"), cam_hint=cam,
                                source_title=meta.get("title"), wish=job.get("wish"),
-                               previous=prev.get("ai") if job.get("wish") else None, brief=_brief(job))
+                               previous=prev.get("ai") if job.get("wish") else None, brief=_brief(job),
+                               min_len=float(st["min_len"]), max_len=float(st["max_len"]))
         except Exception as e:  # noqa: BLE001 - AI down: still make a decent short
             ai = {"_error": str(e), "parts": [], "score": 0, "titles": [], "punch_words": [], "shouts": [],
                   "hook_text": "WAIT FOR IT", "explanation_ru": "ИИ был недоступен — смонтировал по самому громкому моменту.",

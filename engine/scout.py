@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from . import brain
@@ -102,26 +103,45 @@ def watch(src: Path, duration: float, wd: Path, *, streamer: str | None, title: 
     pieces = [(a, min(duration, a + piece)) for a in range(0, int(duration), int(piece))]
     pieces = [(float(a), b) for a, b in pieces if b - a >= 30]
     found: list[dict] = []
-    problems: list[str] = []
-    for i, (a, b) in enumerate(pieces, 1):
-        if progress:
-            progress(f"🧠 ИИ смотрит стрим: часть {i}/{len(pieces)} ({hms(a)}–{hms(b)})")
-        try:
-            clip = cut_piece(src, a, b - a, wd / f"piece_{i}.mp4")
-            part = brain.video_part(clip, force_upload=True)
-            out = brain.generate([part, {"text": prompt_for(a, b, streamer, title, chat_hint_for(spikes, a, b))}],
-                                 SCHEMA, temperature=0.4, media_low=True, patience=True)
-            for m in out.get("moments") or []:
-                s, e = float(m.get("start", 0)), float(m.get("end", 0))
-                if e - s < 8 or s < 0 or s > b - a:
-                    continue
-                e = min(e, b - a, s + 75)
-                found.append({**m, "start": a + s, "end": a + e})
-            clip.unlink(missing_ok=True)
-        except Exception as e:  # noqa: BLE001 - one bad piece must not kill the whole search
-            problems.append(f"{hms(a)}–{hms(b)}: {str(e)[:160]}")
-            print(f"piece {i} failed: {e}")
-    return found, problems
+    errors: dict[int, str] = {}
+
+    def one(i: int, a: float, b: float) -> None:
+        clip = wd / f"piece_{i}.mp4"
+        if not clip.exists():
+            cut_piece(src, a, b - a, clip)
+        part = brain.video_part(clip, force_upload=True)
+        out = brain.generate([part, {"text": prompt_for(a, b, streamer, title, chat_hint_for(spikes, a, b))}],
+                             SCHEMA, temperature=0.4, media_low=True, patience=True)
+        for m in out.get("moments") or []:
+            s, e = float(m.get("start", 0)), float(m.get("end", 0))
+            if e - s < 8 or s < 0 or s > b - a:
+                continue
+            e = min(e, b - a, s + 75)
+            found.append({**m, "start": a + s, "end": a + e})
+        clip.unlink(missing_ok=True)
+
+    todo = list(enumerate(pieces, 1))
+    rounds = int(cfg.get("retry_rounds", 2)) + 1
+    for rnd in range(rounds):
+        if rnd:  # Gemini was overloaded / out of quota: wait, then try only the failed pieces again
+            if progress:
+                progress(f"⏳ Gemini был перегружен — жду и повторяю {len(todo)} част(ь/и) (попытка {rnd + 1})")
+            time.sleep(float(cfg.get("retry_wait", 180)))
+        failed = []
+        for i, (a, b) in todo:
+            if progress:
+                progress(f"🧠 ИИ смотрит стрим: часть {i}/{len(pieces)} ({hms(a)}–{hms(b)})")
+            try:
+                one(i, a, b)
+                errors.pop(i, None)
+            except Exception as e:  # noqa: BLE001 - one bad piece must not kill the whole search
+                errors[i] = f"{hms(a)}–{hms(b)}: {str(e)[:160]}"
+                failed.append((i, (a, b)))
+                print(f"piece {i} failed (round {rnd + 1}): {e}")
+        todo = failed
+        if not todo:
+            break
+    return found, list(errors.values())
 
 
 def rank(cands: list[dict], spikes: list[dict], top: int, min_gap: float = 20.0) -> list[dict]:

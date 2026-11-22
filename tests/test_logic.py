@@ -114,7 +114,8 @@ def test_max_length_enforced():
 
 def test_pace_split_and_timeline():
     words = [{"w": f"w{i}", "s": i * 0.5, "e": i * 0.5 + 0.35} for i in range(40)]
-    parts = plan.clean_parts([{"role": "setup", "start": 0, "end": 10, "camera": "hold", "zoom": 1.1}], 20, ST, True)
+    parts = plan.clean_parts([{"role": "setup", "start": 0, "end": 10, "camera": "hold", "zoom": 1.1}], 20,
+                             style({"min_len": 5}), True)
     sp = plan.split_for_pace(parts, words)
     assert len(sp) >= 3 and all(x["b"] - x["a"] <= 4.0 for x in sp)
     assert sp[1]["camera"] == "cut" and sp[1].get("sub")
@@ -238,3 +239,50 @@ def test_sfx_plan_no_pileup_and_on_events():
     hits = sorted(e["t"] for e in ev if e["kind"] != "riser")
     assert all(b - a >= sfx.MIN_GAP - 1e-9 for a, b in zip(hits, hits[1:]))
     assert all(0 <= e["t"] < 10 for e in ev)
+
+
+def test_min_length_gives_back_context():
+    """A 9-second plan inside a 60-second moment is stretched to 20 s with setup and payoff from the source."""
+    raw = [{"role": "hook", "start": 40, "end": 42, "shot": "game", "camera": "push"},
+           {"role": "setup", "start": 30, "end": 34, "shot": "game", "camera": "hold"},
+           {"role": "punchline", "start": 36, "end": 39, "shot": "game", "camera": "push"},
+           {"role": "reaction", "start": 39, "end": 41, "shot": "react", "camera": "hold"}]
+    p = plan.clean_parts(raw, 60.0, style({"min_len": 20}), has_cam=True)
+    total = sum(x["b"] - x["a"] for x in p)
+    assert 19.9 <= total <= 20.1
+    assert p[0]["role"] == "hook" and p[0]["a"] == 40                 # teaser untouched
+    assert p[1]["a"] < 30                                             # more setup before the story
+    assert all(x["b"] - x["a"] <= 2.21 for x in p if x["shot"] == "react")   # close-ups stay short
+    body = p[1:]
+    assert all(b["a"] >= a["b"] - 0.05 for a, b in zip(body, body[1:]))      # still forward in time
+
+
+def test_min_length_capped_by_source():
+    p = plan.clean_parts([{"role": "setup", "start": 1, "end": 6}], 12.0, style({"min_len": 20}), True)
+    assert abs(sum(x["b"] - x["a"] for x in p) - 12.0) < 0.01
+
+
+def test_scout_retries_overloaded_pieces(monkeypatch, tmp_path):
+    """A piece that fails because Gemini is overloaded is tried again at the end, not lost."""
+    from engine import scout
+    calls = {"n": 0}
+
+    def fake_cut(src, a, length, out):
+        out.write_bytes(b"x")
+        return out
+
+    def fake_generate(parts, schema, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:                      # second piece: overloaded on the first try
+            raise RuntimeError("Gemini недоступен: HTTP 503")
+        return {"moments": [{"start": 10, "end": 40, "score": 8, "kind": "funny", "context_en": "X",
+                             "title_en": "GTA 6 X", "what_ru": "x", "why_ru": "y"}]}
+
+    monkeypatch.setattr(scout, "cut_piece", fake_cut)
+    monkeypatch.setattr(scout.brain, "video_part", lambda clip, force_upload=False: {"text": "video"})
+    monkeypatch.setattr(scout.brain, "generate", fake_generate)
+    monkeypatch.setattr(scout, "config", lambda: {"scout": {"piece_minutes": 30, "retry_rounds": 2, "retry_wait": 0}})
+    found, problems = scout.watch(tmp_path / "v.mp4", 3600, tmp_path, streamer="s", title="t", spikes=[])
+    assert problems == []
+    assert sorted(m["start"] for m in found) == [10, 1810]       # both pieces, absolute times
+    assert calls["n"] == 3
