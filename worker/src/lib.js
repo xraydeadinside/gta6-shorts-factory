@@ -4,7 +4,7 @@ export const ROLE_RU = { hook: "Хук", setup: "Завязка", punchline: "П
 export const CAM_RU = { push: "наезд", pan: "проезд", whip: "рывок", hold: "держим кадр", cut: "склейка" };
 export const STATUS_RU = {
   queued: "⏳ в очереди", working: "⚙️ монтирую", ready: "🟢 готов", published: "✅ опубликован",
-  rejected: "❌ отклонён", failed: "⚠️ ошибка", done: "✔️ готово",
+  rejected: "❌ отклонён", failed: "⚠️ ошибка", done: "✔️ готово", laptop: "💻 ждёт ноутбук",
 };
 
 export const DEFAULT_STYLE = {

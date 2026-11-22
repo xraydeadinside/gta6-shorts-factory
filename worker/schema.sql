@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL,              -- render | vod
   url TEXT NOT NULL,
-  status TEXT NOT NULL,            -- queued | working | ready | published | rejected | failed | done
+  status TEXT NOT NULL,            -- laptop | queued | working | ready | published | rejected | failed | done
   stage TEXT,
   created_at INTEGER,
   updated_at INTEGER,
@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   start REAL,
   end_t REAL,
   note TEXT,
-  brief TEXT,                      -- what the scout AI saw (JSON), for /vod moments
+  brief TEXT,
+  material TEXT,                   -- clip downloaded by the laptop helper (asset name in the private repo)
+  material_meta TEXT,                      -- what the scout AI saw (JSON), for /vod moments
   wish TEXT,
   intro_file_id TEXT,
   reuse_plan INTEGER DEFAULT 0,

@@ -128,7 +128,59 @@ def download(url: str, workdir: Path, start: float | None = None, end: float | N
     cands = [p for p in workdir.glob("src.*") if p.suffix in (".mp4", ".mkv", ".webm", ".mov", ".ts")]
     if not cands:
         raise UserError("Не получилось скачать видео по ссылке.")
-    raw = cands[0]
+    path, pr = _normalise(cands[0], workdir)
+    streamer = link.get("streamer") or _streamer_from_info(info)
+    meta = {
+        "streamer": streamer,
+        "title": info.get("title"),
+        "source_url": link["url"],
+        "kind": link["kind"],
+        "view_count": info.get("view_count"),
+        "duration": pr["duration"],
+        "width": pr["width"],
+        "height": pr["height"],
+    }
+    return {"path": path, "meta": meta, "offset": a or 0.0, "link": link}
+
+
+def from_material(job: dict, workdir: Path) -> dict:
+    """Clip that the laptop helper downloaded (YouTube) and put into the private materials repo."""
+    import json
+    import os
+
+    import requests
+    repo = os.environ.get("MATERIALS_REPO", "")
+    token = os.environ.get("MATERIALS_TOKEN", "")
+    if not repo or not token:
+        raise RuntimeError("MATERIALS_REPO / MATERIALS_TOKEN не заданы")
+    h = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    rel = requests.get(f"https://api.github.com/repos/{repo}/releases/tags/materials", headers=h, timeout=30)
+    rel.raise_for_status()
+    asset = next((a for a in rel.json().get("assets", []) if a["name"] == job["material"]), None)
+    if not asset:
+        raise UserError(f"Не нашёл скачанный файл {job['material']} в хранилище.")
+    workdir.mkdir(parents=True, exist_ok=True)
+    raw = workdir / ("src" + Path(asset["name"]).suffix)
+    with requests.get(asset["url"], headers={**h, "Accept": "application/octet-stream"}, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(raw, "wb") as f:
+            for chunk in r.iter_content(1 << 20):
+                f.write(chunk)
+    path, pr = _normalise(raw, workdir)
+    m = job.get("material_meta") or {}
+    if isinstance(m, str):
+        try:
+            m = json.loads(m)
+        except ValueError:
+            m = {}
+    link = parse_url(job["url"])
+    meta = {"streamer": _streamer_from_info(m), "title": m.get("title"), "source_url": link["url"],
+            "kind": link["kind"], "view_count": m.get("view_count"), "duration": pr["duration"],
+            "width": pr["width"], "height": pr["height"]}
+    return {"path": path, "meta": meta, "offset": float(m.get("start") or 0.0), "link": link}
+
+
+def _normalise(raw: Path, workdir: Path) -> tuple[Path, dict]:
     path = workdir / "source.mp4"
     # normalise: constant 30 fps, <=1080p, mp4/h264 + aac. Makes seeking exact and maths simple.
     run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw),
@@ -143,19 +195,7 @@ def download(url: str, workdir: Path, start: float | None = None, end: float | N
              "anullsrc=r=48000:cl=stereo", "-shortest", "-c:v", "copy", "-c:a", "aac", str(tmp)])
         tmp.replace(path)
         pr = probe(path)
-
-    streamer = link.get("streamer") or _streamer_from_info(info)
-    meta = {
-        "streamer": streamer,
-        "title": info.get("title"),
-        "source_url": link["url"],
-        "kind": link["kind"],
-        "view_count": info.get("view_count"),
-        "duration": pr["duration"],
-        "width": pr["width"],
-        "height": pr["height"],
-    }
-    return {"path": path, "meta": meta, "offset": a or 0.0, "link": link}
+    return path, pr
 
 
 def _streamer_from_info(info: dict) -> str | None:

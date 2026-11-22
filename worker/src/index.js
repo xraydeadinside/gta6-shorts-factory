@@ -53,11 +53,11 @@ async function getJob(env, id) {
   return j;
 }
 const JOB_COLS = ["status", "stage", "wish", "intro_file_id", "reuse_plan", "title", "description", "chosen", "flow_prompt",
-  "flow_ok", "card_msg_id", "ack_msg_id", "result", "error", "run_url", "version", "video_msg_id"];
+  "flow_ok", "card_msg_id", "ack_msg_id", "result", "error", "run_url", "version", "video_msg_id", "material", "material_meta"];
 async function updateJob(env, id, fields) {
   const keys = Object.keys(fields).filter((k) => JOB_COLS.includes(k));
   if (!keys.length) return;
-  const vals = keys.map((k) => (k === "result" && fields[k] && typeof fields[k] === "object" ? JSON.stringify(fields[k]) : fields[k]));
+  const vals = keys.map((k) => ((k === "result" || k === "material_meta") && fields[k] && typeof fields[k] === "object" ? JSON.stringify(fields[k]) : fields[k]));
   await env.DB.prepare(`UPDATE jobs SET ${keys.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
     .bind(...vals, now(), id).run();
 }
@@ -178,6 +178,14 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
     "INSERT INTO jobs (kind, url, status, stage, created_at, updated_at, parent_id, start, end_t, note, brief) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)")
     .bind(kind === "vod" ? "vod" : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
   const id = ins.meta.last_row_id;
+  if (kind !== "vod" && isYouTube(url)) {
+    await updateJob(env, id, { status: "laptop", stage: "ждёт помощника на ноутбуке" });
+    if (!silent) {
+      const m = await say(env, `📥 Принял #${id} (YouTube). YouTube не отдаёт видео серверам GitHub, поэтому его скачивает ноутбук: запусти ярлык «Скачать с YouTube» — он скачает кусок и я смонтирую шортс.`);
+      if (m.result) { await updateJob(env, id, { ack_msg_id: m.result.message_id }); await remember(env, m.result.message_id, id); }
+    }
+    return id;
+  }
   if (!silent) {
     const m = await say(env, kind === "vod"
       ? `✅ Принял запись #${id}. ИИ посмотрит стрим целиком и выберет законченные истории — это 15–40 минут, пришлю шортсы.`
@@ -186,6 +194,10 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
   }
   await dispatchOrFail(env, kind === "vod" ? "vod" : "render", id);
   return id;
+}
+
+function isYouTube(u) {
+  return /^(https?://)?((www|m|music).)?(youtube.com|youtu.be)//i.test(String(u || "").trim());
 }
 
 async function dispatchOrFail(env, kind, id) {
@@ -368,8 +380,35 @@ async function hook(req, env, ctx, p, origin) {
     if (!job) return json({ error: "no job" }, 404);
     return json({ ...job, end: job.end_t, style: await getStyle(env) });
   }
+  // --- laptop helper (YouTube is downloaded from the owner's home internet, not from GitHub servers)
+  if (p === "/hook/materials" && req.method === "GET") {
+    const rows = await env.DB.prepare("SELECT id, url, start, end_t FROM jobs WHERE status = 'laptop' ORDER BY id").all();
+    return json({ jobs: (rows.results || []).map((r) => ({ id: r.id, url: r.url, start: r.start, end: r.end_t })) });
+  }
   const body = await req.json();
+  if (p === "/hook/newclip") {
+    const u = extractUrl(String(body.url || ""));
+    if (!u) return json({ error: "no url" }, 400);
+    const id = await newJob(env, "render", u, {});
+    return json({ ok: true, id });
+  }
   const job = await getJob(env, Number(body.job_id));
+  if (p === "/hook/material") {
+    if (!job) return json({ error: "no job" }, 404);
+    if (body.error) {
+      await updateJob(env, job.id, { status: "failed", stage: "ошибка", error: String(body.error).slice(0, 500) });
+      await say(env, `⚠️ #${job.id}: помощник не смог скачать: ${esc(String(body.error).slice(0, 300))}`);
+      return json({ ok: true });
+    }
+    await updateJob(env, job.id, { material: String(body.asset), material_meta: body.meta || {}, status: "queued",
+      stage: "скачано помощником" });
+    if (job.ack_msg_id) {
+      ctx.waitUntil(tg(env, "editMessageText", { chat_id: env.TELEGRAM_CHAT_ID, message_id: job.ack_msg_id,
+        text: `⏳ #${job.id}: скачал с YouTube через ноутбук, монтирую…`, link_preview_options: { is_disabled: true } }));
+    }
+    await dispatchOrFail(env, "render", job.id);
+    return json({ ok: true });
+  }
   if (p === "/hook/spawn") {
     const moments = body.moments || [];
     let made = 0;

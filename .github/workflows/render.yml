@@ -32,6 +32,8 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       WORKER_URL: ${{ secrets.WORKER_URL }}
       HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+      MATERIALS_TOKEN: ${{ secrets.MATERIALS_TOKEN }}
+      MATERIALS_REPO: xraydeadinside/gta6-materials
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}

@@ -38,7 +38,10 @@ def render_job(job: dict, w: Worker) -> dict:
     t0 = time.time()
 
     w.stage(jid, "⬇️ Скачиваю видео")
-    dl = fetch.download(job["url"], wd, job.get("start"), job.get("end"))
+    if job.get("material"):  # YouTube: the laptop helper already downloaded the piece
+        dl = fetch.from_material(job, wd)
+    else:
+        dl = fetch.download(job["url"], wd, job.get("start"), job.get("end"))
     src, meta = dl["path"], dl["meta"]
     dur = meta["duration"]
     prev = job.get("result") or {}
