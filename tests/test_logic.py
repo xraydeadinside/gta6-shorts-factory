@@ -267,7 +267,7 @@ def test_scout_retries_overloaded_pieces(monkeypatch, tmp_path):
     from engine import scout
     calls = {"n": 0}
 
-    def fake_cut(src, a, length, out):
+    def fake_cut(src, a, length, out, fps=1.0):
         out.write_bytes(b"x")
         return out
 
