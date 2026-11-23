@@ -233,6 +233,51 @@ def vod_job(job: dict, w: Worker) -> dict:
             "chat_spikes": len(spikes), "duration": duration}
 
 
+def longscript_job(job: dict, w: Worker) -> dict:
+    """The AI writes the countdown script from the moment library; the owner approves it in Telegram."""
+    from . import longform
+    jid = job["id"]
+    opts = _brief(job) or {}
+    w.stage(jid, "📚 Собираю библиотеку моментов")
+    library = w.get("/hook/library").get("moments") or []
+    if len(library) < 6:
+        raise fetch.UserError(f"В библиотеке только {len(library)} моментов — нужно хотя бы 6. "
+                              "Пришли /collect по записям стримеров.")
+    w.stage(jid, f"✍️ ИИ пишет сценарий ({len(library)} моментов на выбор)")
+    prev = (job.get("result") or {}).get("script") if opts.get("wish") else None
+    sc = longform.write_script(library, float(opts.get("minutes", 10)), opts.get("wish"), prev)
+    chosen = {it["cand"] for it in sc["items"]}
+    return {"script": sc, "library": [m for m in library if m["id"] in chosen], "library_size": len(library)}
+
+
+def long_job(job: dict, w: Worker) -> dict:
+    """Edit the approved long video, send a preview to Telegram, keep the full file in the private repo."""
+    from . import longform
+    from .notify import send_document, send_photo
+    jid = job["id"]
+    wd = WORK / str(jid)
+    out = longform.render(job, wd, progress=lambda s: w.stage(jid, s))
+    w.stage(jid, "📤 Отправляю")
+    sc = job["result"]["script"]
+    pv = longform.preview(out["path"], wd / "preview.mp4")
+    sent = send_video(pv, f"🎬 Лонг #{jid} · {html.escape(sc['title'])}", out["thumb"], width=854, height=480,
+                      duration=out["duration"])
+    send_photo(out["thumb"], "Превью (обложка) для YouTube")
+    meta = wd / "youtube.txt"
+    meta.write_text(f"TITLE:\n{sc['title']}\n\nDESCRIPTION:\n{out['description']}\n\nTAGS:\n"
+                    + ", ".join(sc.get("tags") or []), encoding="utf-8")
+    send_document(meta, "Название, описание с главами и теги — копируй при загрузке")
+    url = None
+    try:
+        w.stage(jid, "💾 Кладу полную версию в хранилище")
+        url = longform.store_full(out["path"])
+    except Exception as e:  # noqa: BLE001 - the preview is already delivered
+        print(f"store failed: {e}")
+    return {**job["result"], "duration": round(out["duration"], 1), "chapters": out["chapters"],
+            "description": out["description"], "full_url": url, "video_msg_id": sent["message_id"],
+            "video_file_id": sent["file_id"]}
+
+
 def upload_job(job: dict, w: Worker) -> dict:
     from .youtube_upload import upload
     res = job.get("result") or {}
@@ -265,6 +310,12 @@ def main() -> int:
             wd.mkdir(parents=True, exist_ok=True)
             res = analyse_ref(job, wd)
             res = {k: v for k, v in res.items() if not k.startswith("_")}
+            w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})
+        elif kind == "longscript":
+            res = longscript_job(job, w)
+            w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})
+        elif kind == "long":
+            res = long_job(job, w)
             w.post("/hook/done", {"job_id": jid, "kind": kind, "result": res})
         elif kind == "upload":
             res = upload_job(job, w)

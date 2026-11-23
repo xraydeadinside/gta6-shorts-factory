@@ -27,6 +27,24 @@ def send_video(path: Path, caption: str, thumb: Path | None = None, width: int =
     return {"message_id": msg["message_id"], "file_id": vid.get("file_id")}
 
 
+def send_photo(path: Path, caption: str = "") -> None:
+    try:
+        with path.open("rb") as f:
+            requests.post(_tg("sendPhoto"), data={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "caption": caption[:1000]},
+                          files={"photo": (path.name, f, "image/jpeg")}, timeout=120)
+    except requests.RequestException:
+        pass
+
+
+def send_document(path: Path, caption: str = "") -> None:
+    try:
+        with path.open("rb") as f:
+            requests.post(_tg("sendDocument"), data={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "caption": caption[:1000]},
+                          files={"document": (path.name, f)}, timeout=120)
+    except requests.RequestException:
+        pass
+
+
 def send_text(text: str) -> None:
     try:
         requests.post(_tg("sendMessage"), json={"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text[:4000]},
@@ -60,6 +78,11 @@ class Worker:
 
     def job(self, job_id: int) -> dict:
         r = requests.get(f"{self.base}/hook/job/{job_id}", headers=self._h(), timeout=30)
+        r.raise_for_status()
+        return r.json()
+
+    def get(self, path: str) -> dict:
+        r = requests.get(f"{self.base}{path}", headers=self._h(), timeout=60)
         r.raise_for_status()
         return r.json()
 

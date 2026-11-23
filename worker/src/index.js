@@ -53,7 +53,7 @@ async function getJob(env, id) {
   return j;
 }
 const JOB_COLS = ["status", "stage", "wish", "intro_file_id", "reuse_plan", "title", "description", "chosen", "flow_prompt",
-  "flow_ok", "card_msg_id", "ack_msg_id", "result", "error", "run_url", "version", "video_msg_id", "material", "material_meta"];
+  "flow_ok", "card_msg_id", "ack_msg_id", "result", "error", "run_url", "version", "video_msg_id", "material", "material_meta", "brief"];
 async function updateJob(env, id, fields) {
   const keys = Object.keys(fields).filter((k) => JOB_COLS.includes(k));
   if (!keys.length) return;
@@ -137,7 +137,7 @@ async function handleUpdate(env, upd, origin) {
 function quickToast(act) {
   return { t: "Название выбрано", nt: "Придумываю новые…", ct: "Напиши название", cd: "Напиши описание", rm: "Напиши пожелание",
     fp: "Промпт для Flow", fa: "Утверждено", fo: "Придумываю другой…", fw: "Напиши пожелание", pub: "Готовлю публикацию",
-    rej: "Отклонено", un: "Вернул" }[act] || "";
+    rej: "Отклонено", un: "Вернул", la: "Запускаю монтаж", ll: "Меняю длину…", lr: "Напиши пожелание" }[act] || "";
 }
 
 async function onCommand(env, { cmd, arg }, origin) {
@@ -178,6 +178,12 @@ async function onCommand(env, { cmd, arg }, origin) {
     const brief = JSON.stringify({ mode: "collect", hours: rest[0] || 3, from_hours: rest[1] || 0 });
     return newJob(env, "vod", u, { brief, note: "сбор моментов для лонга" });
   }
+  if (cmd === "long") {
+    const num = (arg.match(/\b(\d{1,2})\b/) || [])[1];
+    const minutes = Math.max(6, Math.min(20, Number(num) || 10));
+    const wish = arg.replace(/\b\d{1,2}\b/, "").trim() || null;
+    return newJob(env, "long", "long:streamers-react", { brief: JSON.stringify({ minutes, wish }), note: wish });
+  }
   if (cmd === "status") return say(env, await statusText(env));
   if (cmd === "cancel") { await kvDel(env, "await"); return say(env, "Ок, отменил."); }
   if (cmd === "login" || cmd === "panel") {
@@ -207,7 +213,7 @@ async function statusText(env) {
 async function newJob(env, kind, url, { start = null, end = null, note = null, brief = null, parent = null, silent = false } = {}) {
   const ins = await env.DB.prepare(
     "INSERT INTO jobs (kind, url, status, stage, created_at, updated_at, parent_id, start, end_t, note, brief) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(["vod", "ref"].includes(kind) ? kind : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
+    .bind(["vod", "ref", "long"].includes(kind) ? kind : "render", url, "в очереди", now(), now(), parent, start, end, note, brief).run();
   const id = ins.meta.last_row_id;
   if (kind === "render" && isYouTube(url)) {
     await updateJob(env, id, { status: "laptop", stage: "ждёт помощника на ноутбуке" });
@@ -218,15 +224,40 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
     return id;
   }
   if (!silent) {
-    const m = await say(env, kind === "ref"
+    const m = await say(env, kind === "long"
+      ? `📝 Лонг #${id}: ИИ выбирает лучшие моменты из библиотеки и пишет сценарий. Пришлю его на утверждение.`
+      : kind === "ref"
       ? `📚 Сохранил пример #${id}. ИИ разбирает его стиль (хук, темп, субтитры, вебка, звук) — пришлю разбор через пару минут.`
       : kind === "vod"
       ? `✅ Принял запись #${id}. ИИ посмотрит стрим целиком и выберет законченные истории — это 15–40 минут, пришлю шортсы.`
       : `✅ Принял #${id}. Монтирую — пришлю готовый шортс через ~4–7 минут.`);
     if (m.result) { await updateJob(env, id, { ack_msg_id: m.result.message_id }); await remember(env, m.result.message_id, id); }
   }
-  await dispatchOrFail(env, ["vod", "ref"].includes(kind) ? kind : "render", id);
+  await dispatchOrFail(env, kind === "long" ? "longscript" : ["vod", "ref"].includes(kind) ? kind : "render", id);
   return id;
+}
+
+async function sendScript(env, id, res) {
+  const sc = res.script || {};
+  const head = [`📝 <b>Сценарий лонга #${id}</b> (~${sc.minutes} мин, ${(sc.items || []).length} моментов из ${res.library_size || "?"})`,
+    `<b>${esc(sc.title || "")}</b>`, `Обложка: «${esc(sc.thumbnail_text || "")}» — ${esc(sc.thumbnail_idea || "")}`, "",
+    `🎣 <b>Хук:</b> ${esc(sc.hook_vo || "")} ${esc(sc.promise_vo || "")} ${esc(sc.stakes_vo || "")}`, ""];
+  const lib = Object.fromEntries((res.library || []).map((m) => [m.id, m]));
+  const n = (sc.items || []).length;
+  const items = (sc.items || []).map((it, k) => {
+    const m = lib[it.cand] || {};
+    return `<b>#${n - k} ${esc(it.label_en || "")}</b> · ${esc(m.streamer || "")}\n${esc(it.what_ru || m.what_ru || "")}\n<i>${esc(it.vo_before || "")}</i>`;
+  });
+  let text = head.join("\n") + "\n" + items.join("\n\n") + "\n\n🧠 " + esc(sc.explanation_ru || "");
+  if (text.length > 4000) text = text.slice(0, 3990) + "…";
+  const kb = { inline_keyboard: [
+    [{ text: "✅ Утвердить и монтировать", callback_data: `a:${id}:la` }],
+    [{ text: "⏱ 9 мин", callback_data: `a:${id}:ll:9` }, { text: "⏱ 12 мин", callback_data: `a:${id}:ll:12` },
+      { text: "⏱ 15 мин", callback_data: `a:${id}:ll:15` }],
+    [{ text: "🔁 Переписать (с пожеланием)", callback_data: `a:${id}:lr` }],
+  ] };
+  return tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text, parse_mode: "HTML", reply_markup: kb,
+    link_preview_options: { is_disabled: true } });
 }
 
 function isYouTube(u) {
@@ -278,6 +309,30 @@ async function doAction(env, job, act, arg, text, source) {
     return { ok: true, message: msg || "Готово" };
   };
 
+  if (job.kind === "long") {
+    let b = {};
+    try { b = JSON.parse(job.brief || "{}"); } catch (e) { b = {}; }
+    if (act === "la") {
+      if (job.status !== "script") return reply("Этот сценарий уже в работе или готов.");
+      await updateJob(env, job.id, { status: "queued", stage: "в очереди на монтаж" });
+      await dispatchOrFail(env, "long", job.id);
+      return reply(`🎬 Лонг #${job.id}: сценарий утверждён, монтирую. Это займёт 20–40 минут — пришлю превью, обложку и описание.`);
+    }
+    if (act === "ll") {
+      b.minutes = Math.max(6, Math.min(20, Number(arg) || 10));
+      await updateJob(env, job.id, { brief: JSON.stringify(b), status: "queued", stage: "переписываю сценарий" });
+      await dispatchOrFail(env, "longscript", job.id);
+      return reply(`⏱ #${job.id}: переписываю сценарий на ${b.minutes} мин.`);
+    }
+    if (act === "lr") {
+      if (!text) return ask("lr", `🔁 #${job.id}: что поменять в сценарии? (например: «больше Kai Cenat, #1 — кран, меньше шуток»)`);
+      b.wish = text.slice(0, 1000);
+      await updateJob(env, job.id, { brief: JSON.stringify(b), status: "queued", stage: "переписываю сценарий" });
+      await dispatchOrFail(env, "longscript", job.id);
+      return reply(`🔁 #${job.id}: переписываю сценарий с учётом пожелания.`);
+    }
+    return reply("Для лонга доступны кнопки под сценарием.");
+  }
   switch (act) {
     case "t": {
       const n = Math.max(0, Math.min(2, Number(arg) || 0));
@@ -413,6 +468,24 @@ async function hook(req, env, ctx, p, origin) {
     if (!job) return json({ error: "no job" }, 404);
     return json({ ...job, end: job.end_t, style: await getStyle(env) });
   }
+  if (p === "/hook/library" && req.method === "GET") {
+    const rows = await env.DB.prepare("SELECT id, kind, url, start, end_t, brief, result FROM jobs WHERE (kind = 'vod' AND status = 'done') OR (kind = 'render' AND brief IS NOT NULL AND status IN ('ready','published'))").all();
+    const moments = [];
+    for (const j of rows.results || []) {
+      const r = j.result ? JSON.parse(j.result) : {};
+      if (j.kind === "vod") {
+        (r.library || []).forEach((m, i) => moments.push({ ...m, id: `v${j.id}_${i}` }));
+      } else {
+        let b = {};
+        try { b = JSON.parse(j.brief); } catch (e) { b = {}; }
+        const vod = String(j.url).split("?")[0];
+        if (!/twitch\.tv\/videos\//.test(vod)) continue;
+        moments.push({ id: `r${j.id}`, vod, start: (j.start || 0) + 3, end: (j.end_t || 0) - 3, streamer: r.streamer || null,
+          score: b.score, kind: b.kind, context_en: b.context_en, what_ru: b.what_ru, why_ru: b.why_ru, title_en: b.title_en });
+      }
+    }
+    return json({ moments });
+  }
   // --- laptop helper (YouTube is downloaded from the owner's home internet, not from GitHub servers)
   if (p === "/hook/materials" && req.method === "GET") {
     const rows = await env.DB.prepare("SELECT id, url, start, end_t FROM jobs WHERE status = 'laptop' ORDER BY id").all();
@@ -475,6 +548,17 @@ async function hook(req, env, ctx, p, origin) {
       const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("\n");
       if (r.collect) await say(env, `📚 #${job.id}: ${esc(r.how || "")}. В библиотеке ${(r.library || []).length} моментов (оценка 6+) из ${r.candidates || 0}. Лучшие:\n${lines.split("\n").slice(0, 10).join("\n")}`);
       else if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:\n${lines}`);
+      return json({ ok: true });
+    }
+    if (body.kind === "longscript") {
+      await updateJob(env, job.id, { status: "script", stage: "сценарий ждёт утверждения", result: body.result });
+      await sendScript(env, job.id, body.result);
+      return json({ ok: true });
+    }
+    if (body.kind === "long") {
+      await updateJob(env, job.id, { status: "ready", stage: "готов", result: body.result, error: null });
+      const r = body.result || {};
+      await say(env, `✅ Лонг #${job.id} готов: ${Math.round((r.duration || 0) / 60)} мин.\nВыше — превью (сжатое, чтобы влезло в Telegram), обложка и файл с названием, описанием и главами.${r.full_url ? "\nПолное качество: " + esc(r.full_url) : ""}`);
       return json({ ok: true });
     }
     if (body.kind === "ref") {
