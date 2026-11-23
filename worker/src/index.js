@@ -171,6 +171,13 @@ async function onCommand(env, { cmd, arg }, origin) {
     lines.push("", `📝 Замечаний: ${notes.length}`);
     return say(env, lines.join("\n"));
   }
+  if (cmd === "collect") {
+    const u = extractUrl(arg);
+    if (!u) return say(env, "Пришли так: <code>/collect https://twitch.tv/videos/… 3</code> (3 = сколько первых часов смотреть)");
+    const rest = arg.replace(u, "").trim().split(/s+/).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    const brief = JSON.stringify({ mode: "collect", hours: rest[0] || 3, from_hours: rest[1] || 0 });
+    return newJob(env, "vod", u, { brief, note: "сбор моментов для лонга" });
+  }
   if (cmd === "status") return say(env, await statusText(env));
   if (cmd === "cancel") { await kvDel(env, "await"); return say(env, "Ок, отменил."); }
   if (cmd === "login" || cmd === "panel") {
@@ -466,7 +473,8 @@ async function hook(req, env, ctx, p, origin) {
       await updateJob(env, job.id, { status: "done", stage: "готово", result: body.result });
       const r = body.result || {};
       const lines = (r.moments || []).map((m, i) => `${i + 1}. ${esc(m.note || "")}`).join("\n");
-      if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:\n${lines}`);
+      if (r.collect) await say(env, `📚 #${job.id}: ${esc(r.how || "")}. В библиотеке ${(r.library || []).length} моментов (оценка 6+) из ${r.candidates || 0}. Лучшие:\n${lines.split("\n").slice(0, 10).join("\n")}`);
+      else if (lines) await say(env, `🎯 #${job.id}: ${esc(r.how || "")}. Выбрал ${(r.moments || []).length} из ${r.candidates || 0} историй:\n${lines}`);
       return json({ ok: true });
     }
     if (body.kind === "ref") {

@@ -41,12 +41,15 @@ def hms(t: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}"
 
 
-def download_low(url: str, out: Path) -> Path:
-    """Whole VOD in the smallest format that still has picture and sound."""
+def download_low(url: str, out: Path, a: float | None = None, b: float | None = None) -> Path:
+    """The VOD (or its piece a..b seconds) in the smallest format that still has picture and sound."""
     import yt_dlp
+    from yt_dlp.utils import download_range_func
     opts = {"format": "worst[vcodec!=none][acodec!=none][height>=144]/worst[vcodec!=none]/worst",
             "outtmpl": str(out.with_suffix(".%(ext)s")), "quiet": True, "noprogress": True,
             "concurrent_fragment_downloads": 16, "retries": 10, "fragment_retries": 10}
+    if a is not None and b is not None:
+        opts["download_ranges"] = download_range_func(None, [(a, b)])
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         path = Path(ydl.prepare_filename(info))
@@ -58,10 +61,10 @@ def download_low(url: str, out: Path) -> Path:
     return path
 
 
-def cut_piece(src: Path, a: float, length: float, out: Path) -> Path:
+def cut_piece(src: Path, a: float, length: float, out: Path, fps: float = 1.0) -> Path:
     """1 fps, small picture, mono sound: what the AI needs to follow the story, nothing more."""
     run(["ffmpeg", "-y", "-v", "error", "-ss", f"{a:.2f}", "-t", f"{length:.2f}", "-i", str(src),
-         "-vf", "fps=1,scale=-2:240", "-c:v", "libx264", "-preset", "veryfast", "-crf", "34",
+         "-vf", f"fps={fps},scale=-2:240", "-c:v", "libx264", "-preset", "veryfast", "-crf", "34",
          "-c:a", "aac", "-b:a", "32k", "-ac", "1", str(out)])
     return out
 
@@ -96,7 +99,7 @@ def chat_hint_for(spikes: list[dict], a: float, b: float) -> str:
 
 
 def watch(src: Path, duration: float, wd: Path, *, streamer: str | None, title: str | None,
-          spikes: list[dict], progress=None) -> tuple[list[dict], list[str]]:
+          spikes: list[dict], progress=None, offset: float = 0.0, fps: float = 1.0) -> tuple[list[dict], list[str]]:
     """All candidate moments in absolute stream seconds, plus problems per piece (for the report)."""
     cfg = config().get("scout") or {}
     piece = float(cfg.get("piece_minutes", 30)) * 60
@@ -108,16 +111,17 @@ def watch(src: Path, duration: float, wd: Path, *, streamer: str | None, title: 
     def one(i: int, a: float, b: float) -> None:
         clip = wd / f"piece_{i}.mp4"
         if not clip.exists():
-            cut_piece(src, a, b - a, clip)
+            cut_piece(src, a, b - a, clip, fps=fps)
         part = brain.video_part(clip, force_upload=True)
-        out = brain.generate([part, {"text": prompt_for(a, b, streamer, title, chat_hint_for(spikes, a, b))}],
+        out = brain.generate([part, {"text": prompt_for(a + offset, b + offset, streamer, title,
+                                                        chat_hint_for(spikes, a + offset, b + offset))}],
                              SCHEMA, temperature=0.4, media_low=True, patience=True)
         for m in out.get("moments") or []:
             s, e = float(m.get("start", 0)), float(m.get("end", 0))
             if e - s < 8 or s < 0 or s > b - a:
                 continue
             e = min(e, b - a, s + 75)
-            found.append({**m, "start": a + s, "end": a + e})
+            found.append({**m, "start": offset + a + s, "end": offset + a + e})
         clip.unlink(missing_ok=True)
 
     todo = list(enumerate(pieces, 1))

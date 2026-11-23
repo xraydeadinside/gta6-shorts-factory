@@ -186,16 +186,30 @@ def vod_job(job: dict, w: Worker) -> dict:
         raise fetch.UserError(f"Не открыл запись (удалена или только для подписчиков?): {str(e)[:200]}") from e
     duration = float(info.get("duration") or 0)
     streamer = (info.get("uploader_id") or info.get("uploader") or "").lower() or None
+    opts = _brief(job) or {}
+    collect = opts.get("mode") == "collect"  # build a library of moments for long videos, no shorts
+    a0 = max(0.0, float(opts.get("from_hours", 0)) * 3600)
+    b0 = min(duration, a0 + float(opts.get("hours", 3)) * 3600) if collect else duration
     chat = scout.chat_in_background(base, link["id"], duration)
 
-    w.stage(jid, f"⬇️ Скачиваю запись ({scout.hms(duration)}) в низком качестве")
-    src = scout.download_low(base, wd / "vod_low")
-    duration = scout.vod_length(src) or duration
+    w.stage(jid, f"⬇️ Скачиваю запись ({scout.hms(b0 - a0)}) в низком качестве")
+    src = scout.download_low(base, wd / "vod_low", a0 if collect else None, b0 if collect else None)
+    length = scout.vod_length(src) or (b0 - a0)
     chat["thread"].join(timeout=600)
     spikes = chat["spikes"]
 
-    cands, problems = scout.watch(src, duration, wd, streamer=streamer, title=info.get("title"), spikes=spikes,
-                                  progress=lambda s: w.stage(jid, s))
+    cands, problems = scout.watch(src, length, wd, streamer=streamer, title=info.get("title"), spikes=spikes,
+                                  progress=lambda s: w.stage(jid, s), offset=a0 if collect else 0.0,
+                                  fps=0.5 if collect else 1.0)
+    if collect:
+        lib = sorted([m for m in cands if int(m.get("score") or 0) >= 6], key=lambda m: -int(m.get("score") or 0))
+        for m in lib:
+            m["streamer"], m["vod"] = streamer, base
+            m["url"] = f"{base}?t={int(max(0, m['start'] - 3))}s"
+        moments = [{"note": f"{m.get('what_ru', '')} · {m.get('score')}/10 · {scout.hms(m['start'])}"} for m in lib[:25]]
+        return {"collect": True, "library": lib, "moments": moments, "candidates": len(cands),
+                "how": f"ИИ посмотрел {scout.hms(length)} стрима {streamer} и сохранил моменты для лонга",
+                "problems": problems, "duration": duration}
     top = int((config().get("vod") or {}).get("top_moments", 4))
     best = scout.rank(cands, spikes, top)
     how = "ИИ посмотрел стрим"
