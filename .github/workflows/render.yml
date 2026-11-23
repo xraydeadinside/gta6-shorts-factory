@@ -23,7 +23,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 330
     env:
       KIND: ${{ github.event.action || inputs.kind }}
       JOB_ID: ${{ github.event.client_payload.job_id || inputs.job_id }}
