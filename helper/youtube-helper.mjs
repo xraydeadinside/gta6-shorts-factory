@@ -39,9 +39,15 @@ function timecode(url) {
 }
 
 async function api(path, body) {
-  const r = await fetch(env.WORKER_URL + path, body ? { method: "POST", headers: H, body: JSON.stringify(body) } : { headers: H });
-  if (!r.ok) throw new Error(`бот ответил ${r.status}`);
-  return r.json();
+  let last;
+  for (let i = 0; i < 4; i++) {   // home internet drops sometimes: retry
+    try {
+      const r = await fetch(env.WORKER_URL + path, body ? { method: "POST", headers: H, body: JSON.stringify(body) } : { headers: H });
+      if (!r.ok) throw new Error(`бот ответил ${r.status}`);
+      return await r.json();
+    } catch (e) { last = e; await new Promise((s) => setTimeout(s, 3000 * (i + 1))); }
+  }
+  throw last;
 }
 
 async function one(job) {
@@ -58,15 +64,33 @@ async function one(job) {
   for (const f of readdirSync(TMP)) if (f.startsWith(`job${job.id}_`)) rmSync(join(TMP, f));
   const name = job.part != null ? `job${job.id}_p${job.part}_${Date.now()}` : `job${job.id}_${Date.now()}`;
   console.log(`  скачиваю кусок ${Math.round(a)}–${Math.round(b)} сек…`);
-  run(YTDLP, ["--no-playlist", "--no-warnings", "--ffmpeg-location", BIN,
-    "-f", "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
-    "--merge-output-format", "mp4", "--download-sections", `*${a}-${b}`, "--force-keyframes-at-cuts",
-    "-o", join(TMP, `${name}.%(ext)s`), job.url], { stdio: ["ignore", "inherit", "pipe"] });
-  const file = readdirSync(TMP).find((f) => f.startsWith(name));
-  if (!file) throw new Error("файл не скачался");
+  // short shots for long videos: 720p is plenty and 2-3x less to download on a slow connection
+  const h = job.part != null ? 720 : 1080;
+  let file, lastErr;
+  for (let attempt = 1; attempt <= 3 && !file; attempt++) {
+    for (const f of readdirSync(TMP)) if (f.startsWith(name)) rmSync(join(TMP, f));
+    try {
+      run(YTDLP, ["--no-playlist", "--no-warnings", "--ffmpeg-location", BIN, "--retries", "10",
+        "--fragment-retries", "10", "--socket-timeout", "30",
+        "-f", `bv*[height<=${h}][vcodec^=avc1]+ba/b[height<=${h}][ext=mp4]/bv*[height<=${h}]+ba/b`,
+        "--merge-output-format", "mp4", "--download-sections", `*${a}-${b}`, "--force-keyframes-at-cuts",
+        "-o", join(TMP, `${name}.%(ext)s`), job.url], { stdio: ["ignore", "inherit", "pipe"] });
+      file = readdirSync(TMP).find((f) => f.startsWith(name) && f.endsWith(".mp4"));
+    } catch (e) {
+      lastErr = e;
+      console.log(`  попытка ${attempt} не удалась, пробую ещё…`);
+      await new Promise((s) => setTimeout(s, 5000 * attempt));
+    }
+  }
+  if (!file) throw lastErr || new Error("файл не скачался");
   const mb = (statSync(join(TMP, file)).size / 1048576).toFixed(1);
   console.log(`  загружаю в хранилище (${mb} МБ)…`);
-  run(GH, ["release", "upload", "materials", join(TMP, file), "-R", REPO, "--clobber"]);
+  for (let attempt = 1; ; attempt++) {
+    try { run(GH, ["release", "upload", "materials", join(TMP, file), "-R", REPO, "--clobber"]); break; } catch (e) {
+      if (attempt >= 3) throw e;
+      await new Promise((s) => setTimeout(s, 5000 * attempt));
+    }
+  }
   rmSync(join(TMP, file));
   const meta = { title: info.title, channel: info.channel, uploader_id: info.uploader_id, uploader: info.uploader,
     view_count: info.view_count, duration: info.duration, start: a, end: b };

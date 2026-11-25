@@ -544,9 +544,11 @@ async function hook(req, env, ctx, p, origin) {
     const got = (r.footage || []).filter((x) => x.asset).length;
     await updateJob(env, job.id, { result: r, stage: `кадры с YouTube: ${got}/${(r.footage || []).length}` });
     if (!left) {
-      if (got < Math.max(3, Math.ceil((r.footage || []).length * 0.6))) {
-        await updateJob(env, job.id, { status: "failed", stage: "ошибка", error: "не скачалось слишком много кадров" });
-        await say(env, `⚠️ Лонг #${job.id}: скачалось только ${got} из ${(r.footage || []).length} кадров. Запусти помощника ещё раз или «Переписать».`);
+      if (got < Math.max(3, Math.ceil((r.footage || []).length * 0.85))) {
+        // stay in 'laptop': the next helper run retries only the failed shots
+        for (const x of r.footage || []) delete x.failed;
+        await updateJob(env, job.id, { result: r, status: "laptop", stage: `кадры с YouTube: ${got}/${(r.footage || []).length}, остальные докачать` });
+        await say(env, `⚠️ Лонг #${job.id}: скачалось ${got} из ${(r.footage || []).length} кадров (интернет обрывался). Запусти помощника ещё раз — он докачает только недостающие.`);
       } else {
         await updateJob(env, job.id, { status: "queued", stage: "в очереди на монтаж" });
         await dispatchOrFail(env, "long", job.id);
