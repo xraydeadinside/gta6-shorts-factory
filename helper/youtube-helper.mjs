@@ -4,7 +4,7 @@
 // Runs only when you start it (shortcut "Скачать с YouTube.cmd"), does its jobs and exits. Not a server.
 // Needs: tools/bin/yt-dlp.exe, tools/bin/ffmpeg.exe, tools/gh.exe (logged in), .env with WORKER_URL + HOOK_SECRET.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
@@ -101,9 +101,23 @@ async function one(job) {
   console.log(job.part != null ? `  ✅ кадр ${job.part + 1} для лонга #${job.id} готов` : `  ✅ готово — бот монтирует шортс #${job.id}`);
 }
 
+const AUTO = process.argv.includes("--auto");   // started by Windows every 10 min: quiet, no questions
+
 async function main() {
   for (const p of [YTDLP, join(BIN, "ffmpeg.exe"), GH]) if (!existsSync(p)) throw new Error(`нет файла ${p}`);
+  mkdirSync(TMP, { recursive: true });
+  const lock = join(TMP, "running.lock");
+  if (existsSync(lock) && Date.now() - statSync(lock).mtimeMs < 90 * 60 * 1000) {
+    if (!AUTO) console.log("Помощник уже работает в фоне — подожди, он сам всё скачает.");
+    return;
+  }
   let { jobs } = await api("/hook/materials");
+  if (AUTO && !jobs.length) return;          // nothing to do: exit in a second
+  writeFileSync(lock, String(process.pid));
+  try { await work(jobs); } finally { rmSync(lock, { force: true }); }
+}
+
+async function work(jobs) {
   if (!jobs.length) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const url = (await rl.question("Заданий от бота нет. Вставь ссылку YouTube (с ?t= на нужный момент) или просто Enter для выхода:\n> ")).trim();
