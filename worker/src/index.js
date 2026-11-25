@@ -275,8 +275,20 @@ async function sendScript(env, id, res) {
       : `<i>${esc(it.vo_before || "")}</i>`;
     return `<b>#${n - k} ${esc(it.label_en || "")}</b> · ${esc(m.streamer || "")}\n${esc(it.what_ru || m.what_ru || "")}\n${lines}`;
   });
-  let text = head.join("\n") + "\n" + items.join("\n\n") + "\n\n🧠 " + esc(sc.explanation_ru || "");
-  if (text.length > 4000) text = text.slice(0, 3990) + "…";
+  // a long script goes out as several messages, split between points (never inside a tag); buttons on the last
+  const blocks = [head.join("\n"), ...items, "🧠 " + esc(sc.explanation_ru || "")];
+  const msgs = [];
+  let cur = "";
+  for (const b of blocks) {
+    const piece = b.length > 3800 ? b.slice(0, 3800).replace(/<[^>]*$/, "") : b;
+    if (cur && cur.length + 2 + piece.length > 3800) { msgs.push(cur); cur = ""; }
+    cur = cur ? cur + "\n\n" + piece : piece;
+  }
+  if (cur) msgs.push(cur);
+  for (const m of msgs.slice(0, -1)) {
+    await tg(env, "sendMessage", { chat_id: env.TELEGRAM_CHAT_ID, text: m, parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+  }
+  const text = msgs[msgs.length - 1] + "\n\n👇 Утверди или поправь:";
   const kb = { inline_keyboard: [
     [{ text: "✅ Утвердить и монтировать", callback_data: `a:${id}:la` }],
     [{ text: "⏱ 9 мин", callback_data: `a:${id}:ll:9` }, { text: "⏱ 12 мин", callback_data: `a:${id}:ll:12` },
@@ -624,8 +636,12 @@ async function hook(req, env, ctx, p, origin) {
     }
     if (body.kind === "longscript") {
       await updateJob(env, job.id, { status: "script", stage: "сценарий ждёт утверждения", result: body.result });
-      await sendScript(env, job.id, body.result);
-      return json({ ok: true });
+      const sent = await sendScript(env, job.id, body.result);
+      if (!sent || !sent.ok) {   // never leave the owner without the buttons
+        await say(env, `📝 Сценарий лонга #${job.id} готов, но не поместился в сообщение. Открой /login → панель, или нажми кнопку ниже.`,
+          { reply_markup: { inline_keyboard: [[{ text: "✅ Утвердить и монтировать", callback_data: `a:${job.id}:la` }]] } });
+      }
+      return json({ ok: true, sent: !!(sent && sent.ok), err: sent && sent.description });
     }
     if (body.kind === "long") {
       await updateJob(env, job.id, { status: "ready", stage: "готов", result: body.result, error: null });
