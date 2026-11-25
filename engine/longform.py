@@ -24,6 +24,7 @@ W, H, FPS = 1920, 1080, 30
 FONT = str(FONTS_DIR / "Anton-Regular.ttf")
 VOICE = os.environ.get("PIPER_VOICE", str(Path.home() / ".cache" / "piper" / "en_US-ryan-high.onnx"))
 NEON, YELLOW = "0xFF2E9A", "0xFFE600"
+MUTE_SOURCE = False   # set by render() for topic videos
 
 SCRIPT_SCHEMA = {
     "type": "OBJECT",
@@ -282,7 +283,8 @@ def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: in
     if spans and not vo:
         cond = "+".join(f"between(t,{s0 - 0.1:.2f},{s1:.2f})" for s0, s1 in spans)
         vol = f"volume='if(gt({cond},0),0.3,1)':eval=frame"
-    af = f"[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,{vol}[c]"
+    # topic videos: other creators talk in the source -> no source sound at all (loudnorm can't handle silence)
+    af = "[0:a]volume=0[c]" if MUTE_SOURCE else f"[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,{vol}[c]"
     mixes = ["[c]"]
     for k, (t0, wav, _) in enumerate(lines, 1):
         ins += ["-i", str(wav)]
@@ -436,7 +438,9 @@ def render(job: dict, wd: Path, progress) -> dict:
 
     # 1. download every moment (1080p piece of the VOD). The range is the SAME one the anchoring AI watched,
     #    so the narrator's timestamps match the picture exactly. Topic videos use the shots the laptop downloaded.
-    clips = prepare_topic_clips(job, wd, progress) if job["result"].get("footage") else []
+    global MUTE_SOURCE
+    MUTE_SOURCE = bool(job["result"].get("footage"))
+    clips = prepare_topic_clips(job, wd, progress) if MUTE_SOURCE else []
     for k, it in enumerate(items if not clips else []):
         m = lib[it["cand"]]
         progress(f"⬇️ Скачиваю момент {k + 1}/{n} ({m.get('streamer')})")
