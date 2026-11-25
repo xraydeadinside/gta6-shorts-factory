@@ -34,6 +34,7 @@ jobs:
       HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
       MATERIALS_TOKEN: ${{ secrets.MATERIALS_TOKEN }}
       MATERIALS_REPO: xraydeadinside/gta6-materials
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
       YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
       YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
       YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
@@ -62,7 +63,15 @@ jobs:
 
       - run: pip install -q -r requirements.txt && pip install -q -U yt-dlp
 
-      - name: Voice for long videos (Piper, free)
+      - name: Voice cache (ElevenLabs lines already paid for are reused on a re-edit)
+        if: env.KIND == 'long'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tts
+          key: tts-${{ github.run_id }}
+          restore-keys: tts-
+
+      - name: Voice for long videos (Piper, free fallback)
         if: env.KIND == 'long'
         run: |
           pip install -q piper-tts

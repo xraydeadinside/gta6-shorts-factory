@@ -96,23 +96,56 @@ CANDIDATES:
 
 
 # ------------------------------------------------------------------ voice
+TTS_CACHE = Path.home() / ".cache" / "tts"
+
+
+def _elevenlabs(text: str, raw: Path) -> bool:
+    """ElevenLabs voice (paid plan of the owner). Cached by text, so a re-edit does not spend characters again."""
+    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    if not key:
+        return False
+    from .util import config
+    v = (config().get("voice") or {})
+    voice_id, model = v.get("voice_id", "TX3LPaxmHKxFdv7VOQHJ"), v.get("model", "eleven_multilingual_v2")
+    import hashlib
+    h = hashlib.sha1(f"{voice_id}|{model}|{text}".encode()).hexdigest()
+    TTS_CACHE.mkdir(parents=True, exist_ok=True)
+    cached = TTS_CACHE / f"{h}.mp3"
+    if not cached.exists():
+        r = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+                          headers={"xi-api-key": key, "content-type": "application/json"}, timeout=120,
+                          json={"text": text, "model_id": model, "voice_settings": {
+                              "stability": float(v.get("stability", 0.38)), "similarity_boost": 0.8,
+                              "style": float(v.get("style", 0.35)), "use_speaker_boost": True}})
+        if r.status_code != 200:
+            print(f"ElevenLabs failed ({r.status_code}): {r.text[:200]} — using the free voice")
+            return False
+        cached.write_bytes(r.content)
+    raw.write_bytes(cached.read_bytes())
+    return True
+
+
 def tts(text: str, out: Path) -> float:
-    """Piper (free, offline). Returns seconds. Swap for ElevenLabs when there is a key."""
-    from piper import PiperVoice  # type: ignore
-    global _voice
-    try:
-        _voice
-    except NameError:
-        _voice = PiperVoice.load(VOICE)
-    raw = out.with_suffix(".raw.wav")
-    with wave.open(str(raw), "wb") as wf:
-        if hasattr(_voice, "synthesize_wav"):
-            _voice.synthesize_wav(text, wf)
-        else:
-            _voice.synthesize(text, wf)
-    # loud, clear and a bit faster (an energetic narrator), 48 kHz stereo like the rest
+    """ElevenLabs when the key is set, otherwise Piper (free, offline). Returns seconds."""
+    raw = out.with_suffix(".raw.mp3")
+    speed = "atempo=1.0,"
+    if not _elevenlabs(text, raw):
+        from piper import PiperVoice  # type: ignore
+        global _voice
+        try:
+            _voice
+        except NameError:
+            _voice = PiperVoice.load(VOICE)
+        raw = out.with_suffix(".raw.wav")
+        with wave.open(str(raw), "wb") as wf:
+            if hasattr(_voice, "synthesize_wav"):
+                _voice.synthesize_wav(text, wf)
+            else:
+                _voice.synthesize(text, wf)
+        speed = "atempo=1.08,"   # the free voice is slow: a bit faster sounds more energetic
+    # loud and clear, 48 kHz stereo like the rest
     run(["ffmpeg", "-y", "-v", "error", "-i", str(raw), "-af",
-         "atempo=1.08,highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,"
+         speed + "highpass=f=80,acompressor=threshold=-18dB:ratio=3:attack=5:release=80,"
          "loudnorm=I=-16:TP=-1.5:LRA=7", "-ar", "48000", "-ac", "2", str(out)])
     raw.unlink(missing_ok=True)
     return probe(out)["duration"]

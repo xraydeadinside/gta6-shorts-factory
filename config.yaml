@@ -53,3 +53,9 @@ youtube:                   # автозагрузка через YouTube Data AP
   auto_upload: false
   privacy: public
   category_id: "20"        # Gaming
+
+voice:                     # озвучка лонгов: ElevenLabs (если есть ключ ELEVENLABS_API_KEY), иначе бесплатный Piper
+  voice_id: TX3LPaxmHKxFdv7VOQHJ   # Liam — энергичный молодой американец (стиль YouTube-креатора)
+  model: eleven_multilingual_v2    # лучшее качество; eleven_turbo_v2_5 — в 2 раза дешевле по символам
+  stability: 0.38                  # ниже = живее и эмоциональнее
+  style: 0.35
