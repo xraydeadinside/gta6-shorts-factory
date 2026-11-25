@@ -2,7 +2,7 @@
 // Heavy video work is sent to GitHub Actions (repository_dispatch); results come back to /hook/*.
 import {
   HELP, DEFAULT_STYLE, STATUS_RU, cardKeyboard, cardText, cleanStyle, currentDescription, currentTitle,
-  esc, extractUrl, fixTitle, flowKeyboard, parseCallback, parseCommand,
+  dedupeLibrary, esc, extractUrl, fixTitle, flowKeyboard, parseCallback, parseCommand,
 } from "./lib.js";
 import { LOGIN_HTML, PANEL_HTML } from "./panel.js";
 
@@ -239,14 +239,19 @@ async function newJob(env, kind, url, { start = null, end = null, note = null, b
 
 async function sendScript(env, id, res) {
   const sc = res.script || {};
-  const head = [`📝 <b>Сценарий лонга #${id}</b> (~${sc.minutes} мин, ${(sc.items || []).length} моментов из ${res.library_size || "?"})`,
+  const head = [`📝 <b>Сценарий лонга #${id}</b> (~${sc.minutes} мин, ${(sc.items || []).length} моментов из ${res.library_size || "?"}` +
+    `${res.dupes ? `, склеено повторов: ${res.dupes}` : ""}${res.used ? `, уже было в лонгах: ${res.used}` : ""})`,
+    "▶ = секунда клипа, на которой звучит фраза диктора (поверх действия, стример в этот момент тише)",
     `<b>${esc(sc.title || "")}</b>`, `Обложка: «${esc(sc.thumbnail_text || "")}» — ${esc(sc.thumbnail_idea || "")}`, "",
     `🎣 <b>Хук:</b> ${esc(sc.hook_vo || "")} ${esc(sc.promise_vo || "")} ${esc(sc.stakes_vo || "")}`, ""];
   const lib = Object.fromEntries((res.library || []).map((m) => [m.id, m]));
   const n = (sc.items || []).length;
   const items = (sc.items || []).map((it, k) => {
     const m = lib[it.cand] || {};
-    return `<b>#${n - k} ${esc(it.label_en || "")}</b> · ${esc(m.streamer || "")}\n${esc(it.what_ru || m.what_ru || "")}\n<i>${esc(it.vo_before || "")}</i>`;
+    const lines = (it.vo_lines || []).length
+      ? it.vo_lines.map((l) => `▶ ${Number(l.t).toFixed(0)}с: <i>${esc(l.text)}</i>`).join("\n")
+      : `<i>${esc(it.vo_before || "")}</i>`;
+    return `<b>#${n - k} ${esc(it.label_en || "")}</b> · ${esc(m.streamer || "")}\n${esc(it.what_ru || m.what_ru || "")}\n${lines}`;
   });
   let text = head.join("\n") + "\n" + items.join("\n\n") + "\n\n🧠 " + esc(sc.explanation_ru || "");
   if (text.length > 4000) text = text.slice(0, 3990) + "…";
@@ -484,7 +489,7 @@ async function hook(req, env, ctx, p, origin) {
           score: b.score, kind: b.kind, context_en: b.context_en, what_ru: b.what_ru, why_ru: b.why_ru, title_en: b.title_en });
       }
     }
-    return json({ moments });
+    return json(dedupeLibrary(moments, (await kvGet(env, "used_moments")) || []));
   }
   // --- laptop helper (YouTube is downloaded from the owner's home internet, not from GitHub servers)
   if (p === "/hook/materials" && req.method === "GET") {
@@ -558,7 +563,15 @@ async function hook(req, env, ctx, p, origin) {
     if (body.kind === "long") {
       await updateJob(env, job.id, { status: "ready", stage: "готов", result: body.result, error: null });
       const r = body.result || {};
-      await say(env, `✅ Лонг #${job.id} готов: ${Math.round((r.duration || 0) / 60)} мин.\nВыше — превью (сжатое, чтобы влезло в Telegram), обложка и файл с названием, описанием и главами.${r.full_url ? "\nПолное качество: " + esc(r.full_url) : ""}`);
+      // remember which moments this long used: the next longs will not repeat them
+      const used = (await kvGet(env, "used_moments")) || [];
+      for (const m of r.library || []) used.push({ vod: m.vod, start: m.start, end: m.end, long: job.id });
+      await kvSet(env, "used_moments", used.slice(-2000));
+      const ch = r.check || null;
+      const chk = ch ? `\n\n🔍 <b>Проверка ИИ: голос ↔ картинка ${ch.score}/10</b>\n${esc(ch.summary_ru || "")}` +
+        (ch.problems || []).slice(0, 8).map((p) => `\n• ${esc(p.t)} — ${esc(p.issue_ru)}`).join("") +
+        ((ch.problems || []).length ? "\nЕсли что-то режет глаз — «Переписать» под сценарием с пожеланием." : "") : "";
+      await say(env, `✅ Лонг #${job.id} готов: ${Math.round((r.duration || 0) / 60)} мин.\nВыше — превью (сжатое, чтобы влезло в Telegram), обложка и файл с названием, описанием и главами.${r.full_url ? "\nПолное качество: " + esc(r.full_url) : ""}${chk}`);
       return json({ ok: true });
     }
     if (body.kind === "ref") {

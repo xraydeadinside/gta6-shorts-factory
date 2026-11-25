@@ -138,6 +138,24 @@ export function flowKeyboard(id) {
   };
 }
 
+/** One moment per story: merge moments of the same VOD that overlap (keep the best scored),
+ *  and drop the ones already used in a finished long video. */
+export function dedupeLibrary(moments, used) {
+  const key = (u) => String(u || "").split("?")[0];
+  const overlap = (a, b) => key(a.vod) === key(b.vod) &&
+    Math.min(a.end, b.end) - Math.max(a.start, b.start) > 0.4 * Math.min(a.end - a.start, b.end - b.start);
+  const sorted = [...moments].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const kept = [];
+  let dupes = 0, usedOut = 0;
+  for (const m of sorted) {
+    if (!(m.end > m.start)) continue;
+    if (used.some((u) => overlap(m, u))) { usedOut++; continue; }
+    if (kept.some((k) => overlap(m, k))) { dupes++; continue; }
+    kept.push(m);
+  }
+  return { moments: kept, dupes, used: usedOut };
+}
+
 export function parseCallback(data) {
   const m = String(data || "").match(/^a:(\d+):(\w+)(?::(.*))?$/);
   return m ? { id: Number(m[1]), act: m[2], arg: m[3] } : null;

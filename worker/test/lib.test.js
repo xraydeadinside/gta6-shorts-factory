@@ -59,3 +59,18 @@ test("panel pages are complete html", () => {
   }
   assert.ok(PANEL_HTML.includes("/api/jobs"));
 });
+
+test("library: overlapping moments merged, used ones dropped", async () => {
+  const { dedupeLibrary } = await import("../src/lib.js");
+  const v = "https://www.twitch.tv/videos/1";
+  const moments = [
+    { id: "a", vod: v, start: 100, end: 140, score: 7 },
+    { id: "b", vod: v + "?t=95s", start: 105, end: 150, score: 9 },   // same story, better -> kept
+    { id: "c", vod: v, start: 300, end: 330, score: 8 },              // used in a long -> dropped
+    { id: "d", vod: "https://www.twitch.tv/videos/2", start: 100, end: 140, score: 6 },
+  ];
+  const r = dedupeLibrary(moments, [{ vod: v, start: 295, end: 335 }]);
+  assert.deepEqual(r.moments.map((m) => m.id), ["b", "d"]);
+  assert.equal(r.dupes, 1);
+  assert.equal(r.used, 1);
+});

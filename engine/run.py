@@ -239,7 +239,8 @@ def longscript_job(job: dict, w: Worker) -> dict:
     jid = job["id"]
     opts = _brief(job) or {}
     w.stage(jid, "📚 Собираю библиотеку моментов")
-    library = w.get("/hook/library").get("moments") or []
+    lib = w.get("/hook/library")
+    library = lib.get("moments") or []
     if len(library) < 6:
         raise fetch.UserError(f"В библиотеке только {len(library)} моментов — нужно хотя бы 6. "
                               "Пришли /collect по записям стримеров.")
@@ -247,7 +248,12 @@ def longscript_job(job: dict, w: Worker) -> dict:
     prev = (job.get("result") or {}).get("script") if opts.get("wish") else None
     sc = longform.write_script(library, float(opts.get("minutes", 10)), opts.get("wish"), prev)
     chosen = {it["cand"] for it in sc["items"]}
-    return {"script": sc, "library": [m for m in library if m["id"] in chosen], "library_size": len(library)}
+    picked = [m for m in library if m["id"] in chosen]
+    wd = WORK / str(jid)
+    wd.mkdir(parents=True, exist_ok=True)
+    sc = longform.anchor_items(sc, picked, wd, progress=lambda s: w.stage(jid, s))
+    return {"script": sc, "library": picked, "library_size": len(library), "dupes": lib.get("dupes", 0),
+            "used": lib.get("used", 0)}
 
 
 def long_job(job: dict, w: Worker) -> dict:
@@ -267,6 +273,12 @@ def long_job(job: dict, w: Worker) -> dict:
     meta.write_text(f"TITLE:\n{sc['title']}\n\nDESCRIPTION:\n{out['description']}\n\nTAGS:\n"
                     + ", ".join(sc.get("tags") or []), encoding="utf-8")
     send_document(meta, "Название, описание с главами и теги — копируй при загрузке")
+    check = None
+    try:
+        w.stage(jid, "🔍 ИИ проверяет, совпадает ли голос с картинкой")
+        check = longform.check_alignment(out["path"], out["narration"], wd)
+    except Exception as e:  # noqa: BLE001 - the video is done anyway
+        print(f"check failed: {e}")
     url = None
     try:
         w.stage(jid, "💾 Кладу полную версию в хранилище")
@@ -274,7 +286,7 @@ def long_job(job: dict, w: Worker) -> dict:
     except Exception as e:  # noqa: BLE001 - the preview is already delivered
         print(f"store failed: {e}")
     return {**job["result"], "duration": round(out["duration"], 1), "chapters": out["chapters"],
-            "description": out["description"], "full_url": url, "video_msg_id": sent["message_id"],
+            "description": out["description"], "full_url": url, "check": check, "video_msg_id": sent["message_id"],
             "video_file_id": sent["file_id"]}
 
 

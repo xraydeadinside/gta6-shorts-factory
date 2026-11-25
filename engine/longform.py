@@ -231,9 +231,19 @@ def card(out: Path, bg: Path, title: str, sub: str, vo: Path | None, wd: Path, *
 
 
 def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: int | None, streamer: str | None,
-                 vo: Path | None = None, vo_text: str = "", duck: float = 1.0) -> float:
-    """A piece of the stream, full frame. Corner badge with the place, credit, optional VO over a ducked clip."""
+                 vo: Path | None = None, vo_text: str = "", duck: float = 1.0,
+                 lines: list[tuple[float, Path, str]] | None = None) -> float:
+    """A piece of the stream, full frame, corner badge with the place and the streamer credit.
+
+    `lines` = narrator lines [(t in this segment, wav, text)] placed ON the action they describe: the stream
+    sound is lowered to ~30% while the narrator talks (ducking) and comes back right after."""
     dur = b - a
+    lines = list(lines or [])
+    if vo:
+        lines.insert(0, (0.2, vo, vo_text))
+    spans = []
+    for t0, wav, _ in lines:
+        spans.append((t0, min(dur, t0 + probe(wav)["duration"] + 0.15)))
     fx = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
     if rank:
         fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, f'#{rank}')}':fontsize=110:fontcolor={NEON}:"
@@ -241,14 +251,24 @@ def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: in
     if streamer:
         fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, f'twitch.tv/{streamer}')}':fontsize=44:"
                f"fontcolor=white:borderw=4:bordercolor=black:x=40:y=h-80:alpha=0.85")
-    for f in _caption_filters(wd, vo_text, 0.2, probe(vo)["duration"] if vo else 0):
-        fx += "," + f
+    for (t0, wav, text), (s0, s1) in zip(lines, spans):
+        for f in _caption_filters(wd, text, t0, s1 - t0 - 0.15):
+            fx += "," + f
     fx += "[v]"
     ins = ["-ss", f"{a:.2f}", "-t", f"{dur:.2f}", "-i", str(src)]
-    af = f"[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,volume={duck}[c]"
-    if vo:
-        ins += ["-i", str(vo)]
-        af += f";[1:a]adelay=200|200,apad[v1];[c][v1]amix=inputs=2:normalize=0,atrim=duration={dur:.2f}[a]"
+    vol = f"volume={duck}"
+    if spans and not vo:
+        cond = "+".join(f"between(t,{s0 - 0.1:.2f},{s1:.2f})" for s0, s1 in spans)
+        vol = f"volume='if(gt({cond},0),0.3,1)':eval=frame"
+    af = f"[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,{vol}[c]"
+    mixes = ["[c]"]
+    for k, (t0, wav, _) in enumerate(lines, 1):
+        ins += ["-i", str(wav)]
+        d = int(max(0.0, t0) * 1000)
+        af += f";[{k}:a]adelay={d}|{d},apad[l{k}]"
+        mixes.append(f"[l{k}]")
+    if len(mixes) > 1:
+        af += f";{''.join(mixes)}amix=inputs={len(mixes)}:normalize=0,atrim=duration={dur:.2f}[a]"
     else:
         af += ";[c]anull[a]"
     run(["ffmpeg", "-y", "-v", "error", *ins, "-filter_complex", fx + ";" + af, "-map", "[v]", "-map", "[a]",
@@ -329,23 +349,20 @@ def render(job: dict, wd: Path, progress) -> dict:
     lib = {m["id"]: m for m in job["result"]["library"]}
     items = sc["items"]
     n = len(items)
-    minutes = float(sc.get("minutes") or 10)
-    per_item = (minutes * 60 - 75) / n                       # seconds per place, all included
     wd.mkdir(parents=True, exist_ok=True)
 
-    # 1. download every moment (1080p piece of the VOD)
+    # 1. download every moment (1080p piece of the VOD). The range is the SAME one the anchoring AI watched,
+    #    so the narrator's timestamps match the picture exactly.
     clips = []
     for k, it in enumerate(items):
         m = lib[it["cand"]]
         progress(f"⬇️ Скачиваю момент {k + 1}/{n} ({m.get('streamer')})")
-        a, b = max(0.0, float(m["start"]) - 2), float(m["end"]) + 2
+        a, b = clip_range(m)
         dl = fetch.download(m["vod"], wd / f"clip{k}", a, b)
         src = dl["path"]
         length = probe(src)["duration"]
-        budget = max(14.0, per_item - 11)
-        ca = max(0.0, length - budget) if length > budget else 0.0   # keep the end: punchline + reaction
-        peak = audio.loudest_moment(src) or length * 0.7
-        clips.append({"src": src, "a": ca, "b": length, "peak": max(ca + 1.5, min(peak, length - 0.6)),
+        peak = it.get("punch_t") or audio.loudest_moment(src) or length * 0.7
+        clips.append({"src": src, "a": 0.0, "b": length, "peak": max(1.5, min(float(peak), length - 0.6)),
                       "streamer": m.get("streamer"), "rank": n - k, "it": it})
 
     # 2. voice
@@ -356,14 +373,26 @@ def render(job: dict, wd: Path, progress) -> dict:
         vo[key] = wd / f"{key}.wav"
         tts(sc[key], vo[key])
     for c in clips:
-        c["vb"], c["va"] = wd / f"vb{c['rank']}.wav", wd / f"va{c['rank']}.wav"
-        tts(c["it"]["vo_before"], c["vb"])
-        tts(c["it"]["vo_after"], c["va"])
+        r, it = c["rank"], c["it"]
+        anchored = it.get("vo_lines") or [{"t": 0.3, "text": it.get("vo_before") or ""}]
+        c["lines"] = []
+        for j, ln in enumerate(anchored):
+            if not (ln.get("text") or "").strip():
+                continue
+            wav = wd / f"vl{r}_{j}.wav"
+            d = tts(ln["text"], wav)
+            t0 = min(max(0.2, float(ln.get("t") or 0)), max(0.2, c["b"] - d - 0.3))
+            if c["lines"] and t0 < c["lines"][-1][3]:      # never two lines at once
+                t0 = c["lines"][-1][3] + 0.2
+            c["lines"].append((t0, wav, ln["text"], t0 + d))
+        c["va"] = wd / f"va{r}.wav"
+        tts(it.get("vo_after") or "", c["va"])
 
     # 3. segments
     progress("🎬 Монтирую лонг")
     segs: list[Path] = []
     chapters: list[tuple[float, str]] = [(0.0, "Intro")]
+    narration: list[tuple[float, str]] = []      # (time in the final video, line) for the AI check
     t = 0.0
 
     def add(p: Path, d: float) -> None:
@@ -372,19 +401,23 @@ def render(job: dict, wd: Path, progress) -> dict:
         t += d
 
     top = clips[-1]
+    narration.append((0.2, sc["hook_vo"]))
     # hook: 3 s of the #1 moment, then the grab line on a freeze, fast montage with the promise, grid with "#1 ?"
     add(wd / "s_hook.mp4", clip_segment(wd / "s_hook.mp4", top["src"], max(0, top["peak"] - 2.6), top["peak"] + 0.4,
                                         wd, rank=None, streamer=top["streamer"], vo=vo["hook_vo"],
                                         vo_text=sc["hook_vo"], duck=0.5))
     others = [(c["src"], c["peak"]) for c in clips[:-1]][-6:]
     pdur = probe(vo["promise_vo"])["duration"] + 0.4
+    narration.append((t + 0.15, sc["promise_vo"]))
     add(wd / "s_promise.mp4", montage(wd / "s_promise.mp4", others, max(0.8, pdur / max(1, len(others))), wd,
                                       vo["promise_vo"], sc["promise_vo"], total=pdur))
     grid = " ".join(f"#{c['rank']}" for c in clips[:-1]) + " #1?"
     bg0 = frame_at(top["src"], top["peak"], wd / "bg_top.jpg")
+    narration.append((t + 0.35, sc["stakes_vo"]))
     add(wd / "s_stakes.mp4", card(wd / "s_stakes.mp4", bg0, "#1 = ?", grid if len(grid) < 40 else "", vo["stakes_vo"],
                                   wd, vo_text=sc["stakes_vo"], hit="impact", big=260))
     bg1 = frame_at(clips[0]["src"], clips[0]["a"] + 1, wd / "bg_intro.jpg")
+    narration.append((t + 0.35, sc["intro_vo"]))
     add(wd / "s_intro.mp4", card(wd / "s_intro.mp4", bg1, "TOP " + str(n), "STREAMERS VS GTA 6", vo["intro_vo"], wd,
                                  vo_text=sc["intro_vo"], hit="pop", big=220))
 
@@ -396,24 +429,32 @@ def render(job: dict, wd: Path, progress) -> dict:
             bgr = frame_at(clips[-1]["src"], clips[-1]["peak"], wd / "bg_re.jpg")
             pieces = [(x["src"], x["peak"]) for x in clips[-3:]]
             rdur = probe(vo["rehook_vo"])["duration"] + 0.4
+            narration.append((t + 0.15, sc["rehook_vo"]))
             add(wd / "s_rehook.mp4", montage(wd / "s_rehook.mp4", pieces, max(0.8, rdur / 3), wd, vo["rehook_vo"],
                                              sc["rehook_vo"], total=rdur))
         chapters.append((t, f"#{r} {c['it']['label_en'].title()}"))
         bg = frame_at(c["src"], c["a"] + 0.5, wd / f"bg{r}.jpg")
+        # short number card (no talking over a still), then the clip with the narrator ON the action
         add(wd / f"s{r}_card.mp4", card(wd / f"s{r}_card.mp4", bg, f"#{r}", c["it"]["label_en"].upper()[:28],
-                                        c["vb"], wd, vo_text=c["it"]["vo_before"]))
+                                        None, wd, min_len=1.4))
+        for t0, _, text, _ in c["lines"]:
+            narration.append((t + t0, text))
         add(wd / f"s{r}_clip.mp4", clip_segment(wd / f"s{r}_clip.mp4", c["src"], c["a"], c["b"], wd, rank=r,
-                                                streamer=c["streamer"]))
-        bga = frame_at(c["src"], c["b"] - 0.2, wd / f"bga{r}.jpg")
-        add(wd / f"s{r}_after.mp4", card(wd / f"s{r}_after.mp4", bga, "", "", c["va"], wd, min_len=1.0, hit=None,
-                                         vo_text=c["it"]["vo_after"]))
+                                                streamer=c["streamer"], lines=[x[:3] for x in c["lines"]]))
+        if (c["it"].get("vo_after") or "").strip():
+            narration.append((t, c["it"]["vo_after"]))
+            bga = frame_at(c["src"], c["b"] - 0.2, wd / f"bga{r}.jpg")
+            add(wd / f"s{r}_after.mp4", card(wd / f"s{r}_after.mp4", bga, "", "", c["va"], wd, min_len=1.0, hit=None,
+                                             vo_text=c["it"]["vo_after"]))
         if k + 1 == mid_after:
+            narration.append((t + 0.35, sc["mid_cta_vo"]))
             add(wd / "s_cta.mp4", card(wd / "s_cta.mp4", bg, "SUBSCRIBE", "NEW GTA 6 MOMENTS DAILY", vo["mid_cta_vo"],
                                        wd, vo_text=sc["mid_cta_vo"], hit="pop", big=200))
 
     chapters.append((t, "Your Turn"))
     best = [(x["src"], x["peak"]) for x in clips[-4:]]
     odur = probe(vo["outro_cta_vo"])["duration"] + 0.4
+    narration.append((t + 0.15, sc["outro_cta_vo"]))
     add(wd / "s_outro.mp4", montage(wd / "s_outro.mp4", best, max(1.0, odur / 4), wd, vo["outro_cta_vo"],
                                     sc["outro_cta_vo"], total=odur))
     add(wd / "s_end.mp4", card(wd / "s_end.mp4", bg0, "WATCH NEXT", "MORE GTA 6 CHAOS", vo["endscreen_vo"], wd,
@@ -427,7 +468,108 @@ def render(job: dict, wd: Path, progress) -> dict:
     streamers = sorted({c["streamer"] for c in clips if c["streamer"]})
     desc = (sc.get("description") or "").strip() + "\n\nChapters:\n" + chap_txt + "\n\nStreamers:\n" + "\n".join(
         f"https://twitch.tv/{s}" for s in streamers)
-    return {"path": full, "thumb": thumb, "duration": total, "chapters": chapters, "description": desc}
+    return {"path": full, "thumb": thumb, "duration": total, "chapters": chapters, "description": desc,
+            "narration": narration}
+
+
+# ------------------------------------------------------------------ narrator <-> picture
+ANCHOR_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "beats": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "t": {"type": "NUMBER", "description": "seconds from the start of THIS clip"},
+            "what": {"type": "STRING", "description": "what is visible / said at that second"}},
+            "required": ["t", "what"]}},
+        "punch_t": {"type": "NUMBER", "description": "second of the punchline / biggest reaction"},
+        "vo_lines": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "t": {"type": "NUMBER", "description": "when the narrator starts this line (clip seconds)"},
+            "text": {"type": "STRING", "description": "max 16 words, describes what is ON SCREEN at t"}},
+            "required": ["t", "text"]}},
+        "vo_after": {"type": "STRING", "description": "max 12 words, said right after the clip"},
+    },
+    "required": ["beats", "punch_t", "vo_lines", "vo_after"],
+}
+
+
+def clip_range(m: dict) -> tuple[float, float]:
+    """The exact piece of the VOD used for both anchoring and the final edit."""
+    return max(0.0, float(m["start"]) - 2), float(m["end"]) + 2
+
+
+def anchor_items(script: dict, library: list[dict], wd: Path, progress=lambda s: None) -> dict:
+    """The AI watches every chosen clip and ties each narrator line to the second it describes:
+    lines go on the setup / quiet moments, never over the streamer's punchline."""
+    from . import scout
+    lib = {m["id"]: m for m in library}
+    n = len(script["items"])
+    for k, it in enumerate(script["items"]):
+        m = lib.get(it["cand"])
+        if not m:
+            continue
+        progress(f"🎯 ИИ привязывает текст к кадрам: момент {k + 1}/{n}")
+        a, b = clip_range(m)
+        try:
+            low = scout.download_low(m["vod"], wd / f"anchor{k}", a, b)
+            proxy = brain.make_proxy(low, wd / f"anchor{k}_p.mp4")
+            prompt = f"""This clip ({b - a:.0f} s) is place #{n - k} of a GTA 6 streamers countdown video.
+Streamer: {m.get('streamer')}. What happens: {m.get('what_ru')} ({m.get('context_en')}).
+Draft narration (keep the meaning and tone, adapt to the picture): before: "{it.get('vo_before')}" after: "{it.get('vo_after')}"
+Watch AND listen. Then:
+1. beats: 4-8 key seconds with what is on screen.
+2. punch_t: the second of the punchline / biggest reaction.
+3. vo_lines: 1-3 narrator lines, English, short, funny, spoken. Each line starts at t and must describe what the
+   viewer SEES at that time. The first line starts at 0.3-1.5 s and sets up the situation. Put lines only on the
+   setup or on quiet moments: NEVER from punch_t-1.5 to punch_t+4 (the streamer's reaction must be heard), never
+   over the streamer saying something important. Total narration at most 35% of the clip.
+4. vo_after: one short punchy line after the clip."""
+            out = brain.generate([brain.video_part(proxy), {"text": prompt}], ANCHOR_SCHEMA, temperature=0.5,
+                                 patience=True)
+            pt = float(out.get("punch_t") or 0)
+            lines = []
+            for ln in sorted(out.get("vo_lines") or [], key=lambda x: float(x.get("t") or 0)):
+                t0 = float(ln.get("t") or 0)
+                if pt and pt - 1.5 <= t0 <= pt + 4:     # the rule above, enforced
+                    continue
+                if 0 <= t0 < (b - a) - 1 and (ln.get("text") or "").strip():
+                    lines.append({"t": round(t0, 2), "text": ln["text"].strip()})
+            if lines:
+                it["vo_lines"] = lines[:3]
+            if (out.get("vo_after") or "").strip():
+                it["vo_after"] = out["vo_after"].strip()
+            it["punch_t"] = pt or None
+            it["beats"] = out.get("beats") or []
+        except Exception as e:  # noqa: BLE001 - the draft line still works, just not anchored
+            print(f"anchor {k} failed: {e}")
+    return script
+
+
+CHECK_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "score": {"type": "INTEGER", "description": "1-10: how well narration matches the picture"},
+        "problems": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+            "t": {"type": "STRING", "description": "mm:ss"},
+            "issue_ru": {"type": "STRING"}}, "required": ["t", "issue_ru"]}},
+        "summary_ru": {"type": "STRING"},
+    },
+    "required": ["score", "problems", "summary_ru"],
+}
+
+
+def check_alignment(full: Path, narration: list[tuple[float, str]], wd: Path) -> dict:
+    """The AI watches the finished long video and lists places where the narrator talks about something else
+    than what is on screen (or covers the streamer's punchline)."""
+    proxy = wd / "check.mp4"
+    run(["ffmpeg", "-y", "-v", "error", "-i", str(full), "-vf", "fps=1,scale=-2:240", "-c:v", "libx264",
+         "-preset", "veryfast", "-crf", "34", "-c:a", "aac", "-b:a", "32k", "-ac", "1", str(proxy)])
+    lines = "\n".join(f"{fmt(t)} {text}" for t, text in narration)
+    prompt = f"""This is a finished GTA 6 streamers countdown video. Below is the narrator's script with the time each
+line starts. Watch AND listen. Find every place where the narration does not match what is on screen, is said
+too early or too late, or talks over the streamer's punchline. Be strict but fair; give mm:ss of each problem.
+NARRATION:
+{lines}"""
+    return brain.generate([brain.video_part(proxy, force_upload=True), {"text": prompt}], CHECK_SCHEMA,
+                          temperature=0.2, media_low=True, patience=True)
 
 
 def preview(full: Path, out: Path, max_mb: float = 45.0) -> Path:

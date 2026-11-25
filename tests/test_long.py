@@ -22,7 +22,9 @@ def _script(lib, n):
             "thumbnail_idea": "", "hook_vo": vo, "promise_vo": vo, "stakes_vo": vo, "intro_vo": vo,
             "mid_cta_vo": vo, "rehook_vo": vo, "outro_cta_vo": vo, "endscreen_vo": vo,
             "items": [{"cand": m["id"], "label_en": f"MOMENT {k}", "vo_before": vo, "vo_after": "Wow.",
-                       "what_ru": "x"} for k, m in enumerate(lib[:n])],
+                       "what_ru": "x", "punch_t": 6.0,
+                       "vo_lines": [{"t": 1.0, "text": vo}, {"t": 12.0, "text": "And then this."}]}
+                      for k, m in enumerate(lib[:n])],
             "description": "GTA 6 test", "tags": ["gta 6"], "explanation_ru": "", "minutes": 4}
 
 
@@ -61,6 +63,34 @@ def test_full_long_render(monkeypatch, tmp_path):
     assert pr["duration"] > 60                        # 6 places + hook + intro + outro + 15 s end screen
     assert out["chapters"][0] == (0.0, "Intro") and out["chapters"][1][1].startswith("#6")
     assert "0:00 Intro" in out["description"] and "twitch.tv/kaicenat" in out["description"]
+    texts = [x[1] for x in out["narration"]]
+    assert texts.count("And then this.") == 6                 # every anchored line made it into the video
+    times = [x[0] for x in out["narration"]]
+    assert times == sorted(times) and times[-1] < pr["duration"]
     assert out["thumb"].exists()
     pv = longform.preview(out["path"], tmp_path / "pv.mp4", max_mb=5)
     assert pv.stat().st_size < 5.5 * 1024 * 1024
+
+
+def test_anchor_drops_lines_on_the_punchline(monkeypatch, tmp_path):
+    lib = _lib(2)
+    sc = _script(lib, 2)
+    for it in sc["items"]:
+        it.pop("vo_lines"), it.pop("punch_t")
+
+    def fake_low(url, out, a, b):
+        p = out.with_suffix(".mp4")
+        p.write_bytes(b"x")
+        return p
+
+    monkeypatch.setattr("engine.scout.download_low", fake_low)
+    monkeypatch.setattr(longform.brain, "make_proxy", lambda src, out: src)
+    monkeypatch.setattr(longform.brain, "video_part", lambda p, force_upload=False: {"text": "video"})
+    monkeypatch.setattr(longform.brain, "generate", lambda *a, **k: {
+        "beats": [{"t": 1, "what": "car"}], "punch_t": 10.0, "vo_after": "Classic.",
+        "vo_lines": [{"t": 9.5, "text": "on the punchline"}, {"t": 0.5, "text": "He steals a jet."},
+                     {"t": 16, "text": "Then the cops arrive."}]})
+    out = longform.anchor_items(sc, lib, tmp_path)
+    it = out["items"][0]
+    assert [l["text"] for l in it["vo_lines"]] == ["He steals a jet.", "Then the cops arrive."]
+    assert it["punch_t"] == 10.0 and it["vo_after"] == "Classic."
