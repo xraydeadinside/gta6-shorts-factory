@@ -64,7 +64,7 @@ TOPIC_SCRIPT_SCHEMA = {
 
 def _iso_seconds(d: str) -> int:
     import re
-    m = re.match(r"P(?:(d+)D)?T?(?:(d+)H)?(?:(d+)M)?(?:(d+)S)?", d or "")
+    m = re.match(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d or "")
     if not m:
         return 0
     dd, h, mi, s = (int(x or 0) for x in m.groups())
