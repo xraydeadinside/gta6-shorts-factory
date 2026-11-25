@@ -474,7 +474,7 @@ async function hook(req, env, ctx, p, origin) {
     return json({ ...job, end: job.end_t, style: await getStyle(env) });
   }
   if (p === "/hook/library" && req.method === "GET") {
-    const rows = await env.DB.prepare("SELECT id, kind, url, start, end_t, brief, result FROM jobs WHERE (kind = 'vod' AND status = 'done') OR (kind = 'render' AND brief IS NOT NULL AND status IN ('ready','published'))").all();
+    const rows = await env.DB.prepare("SELECT id, kind, url, start, end_t, brief, result FROM jobs WHERE (kind = 'vod' AND result IS NOT NULL) OR (kind = 'render' AND brief IS NOT NULL AND status IN ('ready','published'))").all();
     const moments = [];
     for (const j of rows.results || []) {
       const r = j.result ? JSON.parse(j.result) : {};
@@ -504,6 +504,12 @@ async function hook(req, env, ctx, p, origin) {
     return json({ ok: true, id });
   }
   const job = await getJob(env, Number(body.job_id));
+  if (p === "/hook/partial") {
+    if (!job) return json({ error: "no job" }, 404);
+    const r = { ...(job.result || {}), library: body.library || [], partial: true };
+    await updateJob(env, job.id, { result: r });
+    return json({ ok: true, saved: (body.library || []).length });
+  }
   if (p === "/hook/material") {
     if (!job) return json({ error: "no job" }, 404);
     if (body.error) {

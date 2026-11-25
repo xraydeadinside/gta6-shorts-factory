@@ -99,7 +99,8 @@ def chat_hint_for(spikes: list[dict], a: float, b: float) -> str:
 
 
 def watch(src: Path, duration: float, wd: Path, *, streamer: str | None, title: str | None,
-          spikes: list[dict], progress=None, offset: float = 0.0, fps: float = 1.0) -> tuple[list[dict], list[str]]:
+          spikes: list[dict], progress=None, offset: float = 0.0, fps: float = 1.0,
+          on_piece=None) -> tuple[list[dict], list[str]]:
     """All candidate moments in absolute stream seconds, plus problems per piece (for the report)."""
     cfg = config().get("scout") or {}
     piece = float(cfg.get("piece_minutes", 30)) * 60
@@ -123,6 +124,8 @@ def watch(src: Path, duration: float, wd: Path, *, streamer: str | None, title: 
             e = min(e, b - a, s + 75)
             found.append({**m, "start": offset + a + s, "end": offset + a + e})
         clip.unlink(missing_ok=True)
+        if on_piece:  # save what we have: a cut-off run does not lose the pieces already watched
+            on_piece(list(found))
 
     todo = list(enumerate(pieces, 1))
     rounds = int(cfg.get("retry_rounds", 2)) + 1

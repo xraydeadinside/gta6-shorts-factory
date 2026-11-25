@@ -200,7 +200,11 @@ def vod_job(job: dict, w: Worker) -> dict:
 
     cands, problems = scout.watch(src, length, wd, streamer=streamer, title=info.get("title"), spikes=spikes,
                                   progress=lambda s: w.stage(jid, s), offset=a0 if collect else 0.0,
-                                  fps=0.5 if collect else 1.0)
+                                  fps=0.5 if collect else 1.0,
+                                  on_piece=(lambda found: w.post("/hook/partial", {"job_id": jid, "library": [
+                                      {**m, "streamer": streamer, "vod": base,
+                                       "url": f"{base}?t={int(max(0, m['start'] - 3))}s"}
+                                      for m in found if int(m.get("score") or 0) >= 6]})) if collect else None)
     if collect:
         lib = sorted([m for m in cands if int(m.get("score") or 0) >= 6], key=lambda m: -int(m.get("score") or 0))
         for m in lib:

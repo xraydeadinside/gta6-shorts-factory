@@ -84,7 +84,7 @@ jobs:
         run: python -m engine.run "$KIND" "$JOB_ID"
 
       - name: Report a crash to the bot
-        if: failure()
+        if: failure() || cancelled()
         run: |
           curl -sS -m 20 -X POST "$WORKER_URL/hook/fail" -H "X-Hook-Secret: $HOOK_SECRET" \
             -H "Content-Type: application/json" \
