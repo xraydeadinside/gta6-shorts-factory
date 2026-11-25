@@ -262,7 +262,7 @@ async function sendScript(env, id, res) {
   const sc = res.script || {};
   const head = [`📝 <b>Сценарий лонга #${id}</b> (~${sc.minutes} мин, ${(sc.items || []).length} моментов из ${res.library_size || "?"}` +
     `${res.dupes ? `, склеено повторов: ${res.dupes}` : ""}${res.used ? `, уже было в лонгах: ${res.used}` : ""})`,
-    "▶ = секунда клипа, на которой звучит фраза диктора (поверх действия, стример в этот момент тише)",
+    sc.est_minutes ? `⏱ Ожидаемая длина ролика: ~${sc.est_minutes} мин (${sc.words} слов озвучки)` : "▶ = секунда клипа, на которой звучит фраза диктора (поверх действия, стример в этот момент тише)",
     `<b>${esc(sc.title || "")}</b>`, `Обложка: «${esc(sc.thumbnail_text || "")}» — ${esc(sc.thumbnail_idea || "")}`, "",
     `🎣 <b>Хук:</b> ${esc(sc.hook_vo || "")} ${esc(sc.promise_vo || "")} ${esc(sc.stakes_vo || "")}`, ""];
   const lib = Object.fromEntries((res.library || []).map((m) => [m.id, m]));

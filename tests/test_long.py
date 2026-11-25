@@ -158,3 +158,36 @@ def test_topic_drops_shots_beyond_video_length(monkeypatch):
     out = topic.research("x", 6, None, None, progress=lambda s: None)
     assert all(f["end"] <= 300 for f in out["footage"]) and len(out["footage"]) == 6
     assert topic._iso_seconds("PT14M40S") == 880 and topic._iso_seconds("PT1H2M3S") == 3723
+
+
+def test_topic_short_script_is_expanded(monkeypatch):
+    from engine import topic
+    vids = [{"id": "AAA", "title": "t", "channel": "C", "views": 1, "duration": 600},
+            {"id": "BBB", "title": "t", "channel": "C", "views": 1, "duration": 600}]
+    monkeypatch.setattr(topic, "search", lambda t, n=6: vids)
+    monkeypatch.setattr(topic, "watch", lambda v, t: {"relevant": True, "facts": [
+        {"fact": "f", "start": 10, "end": 16, "visual": "v", "sure": 5}]})
+    short_line, long_line = "Too short.", " ".join(["word"] * 16)
+    calls = []
+
+    def gen(parts, schema, **kw):
+        calls.append(1)
+        line = short_line if len(calls) == 1 else long_line
+        return {"items": [{"label_en": f"P{k}", "what_ru": "x", "vo_lines": [line] * 8, "vo_after": "Ha.",
+                           "shots": [{"video": "AAA", "start": 10, "end": 15, "line": 0}], "sources": ["AAA", "BBB"]}
+                          for k in range(10)]}
+
+    monkeypatch.setattr(topic.brain, "generate", gen)
+    out = topic.research("x", 10, None, None, progress=lambda s: None)
+    assert len(calls) == 2                                   # first script was too short -> expanded once
+    assert out["script"]["words"] >= 0.9 * topic.target_words(10)
+    assert 9 <= out["script"]["est_minutes"] <= 13
+
+
+def test_dark_footage_is_lifted(tmp_path):
+    dark, bright = tmp_path / "d.png", tmp_path / "b.png"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x141414:s=320x180", "-frames:v", "1", str(dark)], check=True)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0xB4B4B4:s=320x180", "-frames:v", "1", str(bright)], check=True)
+    assert longform.lift(bright) == ""
+    f = longform.lift(dark)
+    assert f.startswith(",eq=gamma=") and float(f.split("gamma=")[1].split(":")[0]) > 1.3

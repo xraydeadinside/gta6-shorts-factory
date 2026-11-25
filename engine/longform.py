@@ -185,6 +185,27 @@ def _enc(out: Path) -> list[str]:
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", str(out)]
 
 
+def mean_luma(src: Path, t: float | None = None) -> float:
+    """Average brightness 0..255 of one frame (a still image or a video at second t)."""
+    import subprocess
+    cmd = ["ffmpeg", "-v", "error"] + (["-ss", f"{max(0.0, t):.2f}"] if t is not None else []) + [
+        "-i", str(src), "-frames:v", "1", "-vf", "scale=64:36,format=gray", "-f", "rawvideo", "-"]
+    try:
+        raw = subprocess.run(cmd, capture_output=True, check=True, timeout=60).stdout
+        return sum(raw) / max(1, len(raw))
+    except Exception:  # noqa: BLE001
+        return 128.0
+
+
+def lift(src: Path, t: float | None = None) -> str:
+    """Dark footage (night scenes, dim captures) is brightened so the video never looks murky."""
+    y = mean_luma(src, t)
+    if y >= 95:
+        return ""
+    k = (95 - y) / 95                     # 0 .. 1, darker = stronger
+    return f",eq=gamma={1 + 0.55 * k:.2f}:brightness={0.05 * k:.3f}:contrast={1 + 0.08 * k:.2f}:saturation=1.12"
+
+
 def frame_at(src: Path, t: float, out: Path) -> Path:
     run(["ffmpeg", "-y", "-v", "error", "-ss", f"{max(0, t):.2f}", "-i", str(src), "-frames:v", "1", str(out)])
     return out
@@ -196,7 +217,7 @@ def card(out: Path, bg: Path, title: str, sub: str, vo: Path | None, wd: Path, *
     vo_len = probe(vo)["duration"] if vo else 0.0
     dur = max(min_len, vo_len + 0.5)
     fx = (f"[0:v]scale={W * 2}:{H * 2},zoompan=z='min(1.0+0.0009*on,1.12)':d={int(dur * FPS) + 1}:s={W}x{H}:fps={FPS},"
-          f"boxblur=18:2,eq=brightness=-0.22:saturation=1.2")
+          f"boxblur=14:2,eq=brightness=-0.06:saturation=1.25" + lift(bg))
     fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, title)}':fontsize={big}:fontcolor={NEON}:borderw=14:"
            f"bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2-110")
     if sub:
@@ -244,7 +265,8 @@ def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: in
     spans = []
     for t0, wav, _ in lines:
         spans.append((t0, min(dur, t0 + probe(wav)["duration"] + 0.15)))
-    fx = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+    fx = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1"
+          + lift(src, (a + b) / 2))
     if rank:
         fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, f'#{rank}')}':fontsize=110:fontcolor={NEON}:"
                f"borderw=8:bordercolor=black:x=40:y=30")
@@ -383,9 +405,10 @@ def prepare_topic_clips(job: dict, wd: Path, progress) -> list[dict]:
             pos[p] = ss + d
             out = wd / "shots" / f"p{k}_{j}.mp4"
             run(["ffmpeg", "-y", "-v", "error", "-ss", f"{ss:.2f}", "-i", str(src), "-t", f"{d:.2f}", "-vf",
-                 f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},"
+                 f"scale={int(W * 1.08)}:{int(H * 1.08)}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS}"
+                 + lift(src, ss + d / 2) + ","
                  f"tpad=stop_mode=clone:stop_duration={d:.2f},trim=duration={d:.2f},setsar=1",
-                 "-af", f"volume=0.5,apad,atrim=duration={d:.2f}", *_enc(out)])
+                 "-af", f"volume=0,apad,atrim=duration={d:.2f}", *_enc(out)])
             pieces.append(out)
             lines.append({"t": round(t + 0.15, 2), "text": text})
             t += d
@@ -478,7 +501,8 @@ def render(job: dict, wd: Path, progress) -> dict:
                                   wd, vo_text=sc["stakes_vo"], hit="impact", big=260))
     bg1 = frame_at(clips[0]["src"], clips[0]["a"] + 1, wd / "bg_intro.jpg")
     narration.append((t + 0.35, sc["intro_vo"]))
-    add(wd / "s_intro.mp4", card(wd / "s_intro.mp4", bg1, "TOP " + str(n), "STREAMERS VS GTA 6", vo["intro_vo"], wd,
+    add(wd / "s_intro.mp4", card(wd / "s_intro.mp4", bg1, "TOP " + str(n),
+                                 (sc.get("topic") or "STREAMERS VS GTA 6").upper()[:30], vo["intro_vo"], wd,
                                  vo_text=sc["intro_vo"], hit="pop", big=220))
 
     mid_after = max(1, round(n * 0.25))          # soft CTA at ~25%

@@ -71,6 +71,20 @@ def _iso_seconds(d: str) -> int:
     return dd * 86400 + h * 3600 + mi * 60 + s
 
 
+def target_words(minutes: float) -> int:
+    """Narration needed for a topic video of this length (the voice runs ~88% of it, ~150 words/min)."""
+    return int(minutes * 150 * 0.88)
+
+
+def narration_words(sc: dict) -> int:
+    parts = [sc.get(k) or "" for k in ("hook_vo", "promise_vo", "stakes_vo", "intro_vo", "mid_cta_vo", "rehook_vo",
+                                       "outro_cta_vo", "endscreen_vo")]
+    for it in sc.get("items") or []:
+        parts += [x if isinstance(x, str) else x.get("text", "") for x in it.get("vo_lines") or []]
+        parts.append(it.get("vo_after") or "")
+    return len(" ".join(parts).split())
+
+
 def search(topic: str, n: int = 6) -> list[dict]:
     """Most watched recent videos about the topic (YouTube Data API, the owner's free key)."""
     key = os.environ.get("YOUTUBE_API_KEY", "")
@@ -150,6 +164,9 @@ def research(topic: str, minutes: float, wish: str | None, previous: dict | None
     progress("✍️ ИИ пишет сценарий по фактам")
     prompt = f"""You write a {minutes:.0f}-minute YouTube video for a GTA 6 channel. Topic: "{topic}".
 Make a countdown of exactly {n} points (e.g. mistakes / tips / secrets) using ONLY facts from SOURCES below.
+LENGTH IS CRITICAL: the narration carries the whole video, so ALL narration together must be at least
+{target_words(minutes)} words. Every point needs 6-9 vo_lines of 10-18 words: what the mistake is, why it hurts,
+how to fix it, a practical tip, and a bridge to the next point. Short scripts are rejected.
 - A point must be confirmed by at least 2 different videos, or by one video with sure=5. List them in "sources".
 - shots: 2-3 per point, each 3-8 s, taken from the fact ranges of SOURCES (use those seconds), each shot
   illustrates one vo line ("line" = index). Different shots for different lines; prefer different videos.
@@ -163,6 +180,16 @@ Make a countdown of exactly {n} points (e.g. mistakes / tips / secrets) using ON
 SOURCES:
 {json.dumps([{"video": s["id"], "channel": s["channel"], "title": s["title"], "facts": s["facts"]} for s in sources], ensure_ascii=False)[:70000]}"""
     sc = brain.generate([{"text": prompt}], TOPIC_SCRIPT_SCHEMA, temperature=0.6, patience=True)
+    for _ in range(2):   # too short -> ask to expand (keep facts and shots), never ship a 5-minute "10-minute" video
+        if narration_words(sc) >= 0.9 * target_words(minutes):
+            break
+        progress(f"✍️ Сценарий короткий ({narration_words(sc)} слов) — прошу ИИ расширить")
+        more = f"""This script is too short: {narration_words(sc)} narration words, it must be at least
+{target_words(minutes)}. Rewrite it with the SAME points, the SAME facts and the SAME shots, but give every point
+6-9 vo_lines (what, why it hurts, how to fix, a practical tip, bridge to the next). Do not invent new facts.
+Return the full JSON.
+SCRIPT: {json.dumps(sc, ensure_ascii=False)[:30000]}"""
+        sc = brain.generate([{"text": more}], TOPIC_SCRIPT_SCHEMA, temperature=0.5, patience=True)
     known = {s["id"]: s for s in sources}
     items = []
     for it in sc.get("items") or []:
@@ -176,6 +203,8 @@ SOURCES:
     sc["items"] = items[:n]
     sc["minutes"] = minutes
     sc["topic"] = topic
+    sc["words"] = narration_words(sc)
+    sc["est_minutes"] = round(sc["words"] / 150 / 0.88 + 0.4, 1)
     footage = []
     for k, it in enumerate(sc["items"]):
         for j, s in enumerate(it["shots"]):
