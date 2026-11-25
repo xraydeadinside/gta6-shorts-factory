@@ -18,6 +18,8 @@ export default {
     if (!due.length) return;
     await kvSet(env, "retry_queue", q.filter((x) => x.at > now()));
     for (const x of due) {
+      const j = await getJob(env, x.id);
+      if (!j || j.status !== "retry") continue;   // already handled another way (e.g. script written by hand)
       await updateJob(env, x.id, { status: "queued", stage: `повтор ${x.n}/8` });
       await dispatchOrFail(env, x.kind, x.id);
     }

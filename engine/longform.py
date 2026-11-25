@@ -357,20 +357,32 @@ def prepare_topic_clips(job: dict, wd: Path, progress) -> list[dict]:
         progress(f"⬇️ Беру кадры из хранилища {f['part'] + 1}/{len(footage)}")
         files[f["part"]] = fetch.material_file(f["asset"], wd / "shots" / f"raw{f['part']}")
     clips = []
+    pos: dict[int, float] = {}          # how far each downloaded piece has been used: lines continue, not restart
     for k, it in enumerate(sc["items"]):
         shots = sorted(it["shots"], key=lambda s: int(s.get("line") or 0))
         by_line = {int(s.get("line") or 0): s for s in shots}
         pieces, lines, t, last = [], [], 0.0, shots[0]
         for j, text in enumerate(it["vo_lines"]):
             text = text if isinstance(text, str) else text.get("text", "")
-            s = by_line.get(j, last)
+            if j in by_line:
+                s = by_line[j]
+            elif len(shots) > 1:            # no shot for this line: alternate between the point's pieces
+                s = shots[j % len(shots)]
+            else:
+                s = last
             last = s
             src = files.get(s.get("part"))
             if src is None or not text.strip():
                 continue
             d = tts(text, wd / "shots" / f"tl{k}_{j}.wav") + 0.35
+            p = s.get("part")
+            length = probe(src)["duration"]
+            ss = pos.get(p, 0.0)
+            if ss + d > length:             # piece used up: start it again rather than freeze
+                ss = 0.0
+            pos[p] = ss + d
             out = wd / "shots" / f"p{k}_{j}.mp4"
-            run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-t", f"{d:.2f}", "-vf",
+            run(["ffmpeg", "-y", "-v", "error", "-ss", f"{ss:.2f}", "-i", str(src), "-t", f"{d:.2f}", "-vf",
                  f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},"
                  f"tpad=stop_mode=clone:stop_duration={d:.2f},trim=duration={d:.2f},setsar=1",
                  "-af", f"volume=0.5,apad,atrim=duration={d:.2f}", *_enc(out)])
