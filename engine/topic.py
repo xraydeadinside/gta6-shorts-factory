@@ -62,6 +62,15 @@ TOPIC_SCRIPT_SCHEMA = {
 }
 
 
+def _iso_seconds(d: str) -> int:
+    import re
+    m = re.match(r"P(?:(d+)D)?T?(?:(d+)H)?(?:(d+)M)?(?:(d+)S)?", d or "")
+    if not m:
+        return 0
+    dd, h, mi, s = (int(x or 0) for x in m.groups())
+    return dd * 86400 + h * 3600 + mi * 60 + s
+
+
 def search(topic: str, n: int = 6) -> list[dict]:
     """Most watched recent videos about the topic (YouTube Data API, the owner's free key)."""
     key = os.environ.get("YOUTUBE_API_KEY", "")
@@ -78,15 +87,19 @@ def search(topic: str, n: int = 6) -> list[dict]:
     v = requests.get("https://www.googleapis.com/youtube/v3/videos", timeout=30, params={
         "part": "snippet,statistics,contentDetails", "id": ",".join(ids[:40]), "key": key}).json()
     vids = [{"id": x["id"], "title": x["snippet"]["title"], "channel": x["snippet"]["channelTitle"],
-             "views": int(x["statistics"].get("viewCount", 0))} for x in v.get("items", [])]
+             "views": int(x["statistics"].get("viewCount", 0)),
+             "duration": _iso_seconds(x.get("contentDetails", {}).get("duration", ""))} for x in v.get("items", [])]
+    vids = [x for x in vids if 60 <= x["duration"] <= 40 * 60]
     vids.sort(key=lambda x: -x["views"])
     return vids[:n]
 
 
 def watch(video: dict, topic: str) -> dict:
-    part = {"file_data": {"file_uri": f"https://www.youtube.com/watch?v={video['id']}"},
-            "video_metadata": {"fps": 0.5}}
+    part = {"file_data": {"file_uri": f"https://www.youtube.com/watch?v={video['id']}"}}
+    dur = int(video.get("duration") or 0)
     prompt = f"""Topic of our video: "{topic}". You see a YouTube video "{video['title']}" by {video['channel']}.
+The video is {dur} seconds long ({dur // 60}:{dur % 60:02d}): every timestamp MUST be between 0 and {dur}.
+Give real playback seconds of the video (mm:ss converted to seconds), double-check each one.
 Watch AND listen. List every concrete fact / tip / mistake about the topic that is SHOWN in gameplay, with the
 seconds where it is visible (start-end, 3-10 s, the clearest moment, no talking head, no text-only slides).
 Only real in-game facts; mark rumours / concept art / speculation with sure=1. Max 25 facts."""
@@ -108,7 +121,9 @@ def research(topic: str, minutes: float, wish: str | None, previous: dict | None
             continue
         if out.get("relevant") is False:
             continue
-        facts = [f for f in out.get("facts") or [] if int(f.get("sure") or 0) >= 3 and f["end"] > f["start"]]
+        dur = float(v.get("duration") or 0) or 1e9
+        facts = [f for f in out.get("facts") or [] if int(f.get("sure") or 0) >= 3 and f["end"] > f["start"]
+                 and f["end"] <= dur - 0.5]
         if facts:
             sources.append({**v, "facts": facts})
     if len(sources) < 2:
@@ -133,7 +148,8 @@ SOURCES:
     known = {s["id"]: s for s in sources}
     items = []
     for it in sc.get("items") or []:
-        shots = [s for s in it.get("shots") or [] if s.get("video") in known and 1 <= s["end"] - s["start"] <= 12]
+        shots = [s for s in it.get("shots") or [] if s.get("video") in known and 1 <= s["end"] - s["start"] <= 12
+                 and s["end"] <= float(known[s["video"]].get("duration") or 1e9) - 0.5]
         if shots and it.get("vo_lines"):
             it["shots"] = shots[:3]
             items.append(it)
@@ -149,5 +165,5 @@ SOURCES:
             footage.append({"part": s["part"], "url": f"https://www.youtube.com/watch?v={s['video']}",
                             "start": max(0.0, float(s["start"]) - 0.5), "end": float(s["end"]) + 0.5,
                             "item": k, "channel": known[s["video"]]["channel"]})
-    return {"script": sc, "sources": [{k: s[k] for k in ("id", "title", "channel", "views")} for s in sources],
+    return {"script": sc, "sources": [{k: s.get(k) for k in ("id", "title", "channel", "views", "duration")} for s in sources],
             "footage": footage}

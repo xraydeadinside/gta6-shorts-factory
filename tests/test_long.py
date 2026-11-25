@@ -98,7 +98,7 @@ def test_anchor_drops_lines_on_the_punchline(monkeypatch, tmp_path):
 
 def test_topic_research_keeps_confirmed_points_with_footage(monkeypatch):
     from engine import topic
-    vids = [{"id": "AAA", "title": "t1", "channel": "Ch1", "views": 10}, {"id": "BBB", "title": "t2", "channel": "Ch2", "views": 5}]
+    vids = [{"id": "AAA", "title": "t1", "channel": "Ch1", "views": 10, "duration": 600}, {"id": "BBB", "title": "t2", "channel": "Ch2", "views": 5, "duration": 600}]
     monkeypatch.setattr(topic, "search", lambda t, n=6: vids)
     monkeypatch.setattr(topic, "watch", lambda v, t: {"relevant": True, "facts": [
         {"fact": "f", "start": 10, "end": 16, "visual": "v", "sure": 5}]})
@@ -141,3 +141,20 @@ def test_topic_render_from_shots(monkeypatch, tmp_path):
     assert pr["width"] == 1920 and pr["duration"] > 40
     assert "Footage from:" in out["description"] and "youtu.be/A" in out["description"]
     assert sum(1 for _, t in out["narration"] if t == "Second sentence.") == 4   # every point voiced over its shots
+
+
+def test_topic_drops_shots_beyond_video_length(monkeypatch):
+    from engine import topic
+    vids = [{"id": "AAA", "title": "t", "channel": "C", "views": 1, "duration": 300},
+            {"id": "BBB", "title": "t", "channel": "C", "views": 1, "duration": 300}]
+    monkeypatch.setattr(topic, "search", lambda t, n=6: vids)
+    monkeypatch.setattr(topic, "watch", lambda v, t: {"relevant": True, "facts": [
+        {"fact": "ok", "start": 10, "end": 15, "visual": "v", "sure": 5},
+        {"fact": "too late", "start": 400, "end": 405, "visual": "v", "sure": 5}]})
+    item = lambda k: {"label_en": f"P{k}", "what_ru": "x", "vo_lines": ["One."], "vo_after": "Ha.",
+                      "shots": [{"video": "AAA", "start": 10, "end": 15, "line": 0},
+                                {"video": "AAA", "start": 450, "end": 455, "line": 0}], "sources": ["AAA", "BBB"]}
+    monkeypatch.setattr(topic.brain, "generate", lambda *a, **k: {"items": [item(k) for k in range(6)]})
+    out = topic.research("x", 6, None, None, progress=lambda s: None)
+    assert all(f["end"] <= 300 for f in out["footage"]) and len(out["footage"]) == 6
+    assert topic._iso_seconds("PT14M40S") == 880 and topic._iso_seconds("PT1H2M3S") == 3723

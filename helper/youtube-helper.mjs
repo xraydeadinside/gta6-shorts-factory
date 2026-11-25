@@ -60,6 +60,9 @@ async function one(job) {
     else if ((info.duration || 0) <= MAX_FULL) { a = 0; b = info.duration || MAX_FULL; }
     else throw new Error("Видео длинное, а таймкода нет. Добавь в ссылку ?t=1h2m3s (место момента).");
   }
+  if (info.duration && b > info.duration + 1) {
+    throw new Error(`кадр ${Math.round(a)}–${Math.round(b)} с за пределами ролика (${info.duration} с)`);
+  }
   mkdirSync(TMP, { recursive: true });
   for (const f of readdirSync(TMP)) if (f.startsWith(`job${job.id}_`)) rmSync(join(TMP, f));
   const name = job.part != null ? `job${job.id}_p${job.part}_${Date.now()}` : `job${job.id}_${Date.now()}`;
