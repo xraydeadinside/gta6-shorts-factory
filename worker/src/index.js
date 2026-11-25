@@ -11,6 +11,18 @@ const json = (o, status = 200, headers = {}) =>
 const now = () => Date.now();
 
 export default {
+  // every 5 minutes: start the jobs whose automatic retry time has come
+  async scheduled(event, env, ctx) {
+    const q = (await kvGet(env, "retry_queue")) || [];
+    const due = q.filter((x) => x.at <= now());
+    if (!due.length) return;
+    await kvSet(env, "retry_queue", q.filter((x) => x.at > now()));
+    for (const x of due) {
+      await updateJob(env, x.id, { status: "queued", stage: `повтор ${x.n}/8` });
+      await dispatchOrFail(env, x.kind, x.id);
+    }
+  },
+
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const p = url.pathname;
@@ -649,6 +661,20 @@ async function hook(req, env, ctx, p, origin) {
     return json({ ok: true });
   }
   if (p === "/hook/fail") {
+    // Gemini overloaded (it happens in the daytime): retry automatically instead of failing
+    if (/Gemini недоступен|HTTP 503|high demand/i.test(String(body.error || "")) && body.kind) {
+      const q = (await kvGet(env, "retry_queue")) || [];
+      const prev = q.find((x) => x.id === job.id);
+      const n = (prev ? prev.n : (await kvGet(env, `retries:${job.id}`)) || 0) + 1;
+      if (n <= 8) {
+        const at = now() + 15 * 60 * 1000;
+        await kvSet(env, `retries:${job.id}`, n, 24 * 3600 * 1000);
+        await kvSet(env, "retry_queue", [...q.filter((x) => x.id !== job.id), { id: job.id, kind: body.kind, at, n }]);
+        await updateJob(env, job.id, { status: "retry", stage: `Gemini перегружен — повтор ${n}/8 через 15 мин` });
+        if (n === 1) await say(env, `⏳ #${job.id}: Gemini (ИИ Google) сейчас перегружен. Я сам повторю через 15 минут и дальше каждые 15 минут, пока не получится (до 8 раз). Ничего делать не нужно.`);
+        return json({ ok: true, retry: n });
+      }
+    }
     await updateJob(env, job.id, { status: "failed", stage: "ошибка", error: String(body.error || "").slice(0, 1000) });
     const head = body.user ? "😕" : "⚠️";
     await say(env, `${head} #${job.id}: ${esc(String(body.error || "ошибка").slice(0, 600))}`);
