@@ -94,3 +94,50 @@ def test_anchor_drops_lines_on_the_punchline(monkeypatch, tmp_path):
     it = out["items"][0]
     assert [l["text"] for l in it["vo_lines"]] == ["He steals a jet.", "Then the cops arrive."]
     assert it["punch_t"] == 10.0 and it["vo_after"] == "Classic."
+
+
+def test_topic_research_keeps_confirmed_points_with_footage(monkeypatch):
+    from engine import topic
+    vids = [{"id": "AAA", "title": "t1", "channel": "Ch1", "views": 10}, {"id": "BBB", "title": "t2", "channel": "Ch2", "views": 5}]
+    monkeypatch.setattr(topic, "search", lambda t, n=6: vids)
+    monkeypatch.setattr(topic, "watch", lambda v, t: {"relevant": True, "facts": [
+        {"fact": "f", "start": 10, "end": 16, "visual": "v", "sure": 5}]})
+    item = lambda k, vid: {"label_en": f"P{k}", "what_ru": "x", "vo_lines": ["One.", "Two."], "vo_after": "Ha.",
+                           "shots": [{"video": vid, "start": 10, "end": 15, "line": 0},
+                                     {"video": "ZZZ", "start": 1, "end": 4, "line": 1}], "sources": ["AAA", "BBB"]}
+    sc = {"title": "T", "items": [item(k, "AAA" if k % 2 else "BBB") for k in range(6)]}
+    monkeypatch.setattr(topic.brain, "generate", lambda *a, **k: dict(sc))
+    out = topic.research("beginner mistakes", 6, None, None, progress=lambda s: None)
+    assert len(out["script"]["items"]) == 6
+    assert all(len(it["shots"]) == 1 for it in out["script"]["items"])          # unknown video ZZZ dropped
+    assert len(out["footage"]) == 6 and out["footage"][0]["url"].endswith("watch?v=BBB")
+    assert out["footage"][0]["start"] == 9.5 and out["footage"][0]["end"] == 15.5
+
+
+def test_topic_render_from_shots(monkeypatch, tmp_path):
+    shot = tmp_path / "shot.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30:d=4",
+                    "-f", "lavfi", "-i", "sine=f=220:d=4", "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", str(shot)], check=True)
+
+    def fake_tts(text, out):
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=f=600:d=2.5", "-ar", "48000",
+                        "-ac", "2", str(out)], check=True)
+        return 2.5
+
+    monkeypatch.setattr(longform, "tts", fake_tts)
+    monkeypatch.setattr(longform.fetch, "material_file", lambda name, dest: shot)
+    items = [{"label_en": f"POINT {k}", "what_ru": "x", "vo_lines": ["First sentence.", "Second sentence."],
+              "vo_after": "Nice.", "shots": [{"video": "A", "start": 1, "end": 4, "line": 0, "part": 2 * k},
+                                            {"video": "A", "start": 5, "end": 8, "line": 1, "part": 2 * k + 1}]}
+             for k in range(4)]
+    sc = _script([], 0)
+    sc["items"] = items
+    footage = [{"part": p, "asset": f"a{p}.mp4", "item": p // 2, "channel": "Ch"} for p in range(8)]
+    job = {"id": 2, "result": {"script": sc, "footage": footage,
+                               "sources": [{"id": "A", "channel": "Ch", "title": "t", "views": 1}]}}
+    out = longform.render(job, tmp_path / "w", progress=lambda s: None)
+    pr = probe(out["path"])
+    assert pr["width"] == 1920 and pr["duration"] > 40
+    assert "Footage from:" in out["description"] and "youtu.be/A" in out["description"]
+    assert sum(1 for _, t in out["narration"] if t == "Second sentence.") == 4   # every point voiced over its shots

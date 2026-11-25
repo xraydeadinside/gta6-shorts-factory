@@ -56,7 +56,7 @@ async function one(job) {
   }
   mkdirSync(TMP, { recursive: true });
   for (const f of readdirSync(TMP)) if (f.startsWith(`job${job.id}_`)) rmSync(join(TMP, f));
-  const name = `job${job.id}_${Date.now()}`;
+  const name = job.part != null ? `job${job.id}_p${job.part}_${Date.now()}` : `job${job.id}_${Date.now()}`;
   console.log(`  скачиваю кусок ${Math.round(a)}–${Math.round(b)} сек…`);
   run(YTDLP, ["--no-playlist", "--no-warnings", "--ffmpeg-location", BIN,
     "-f", "bv*[height<=1080][vcodec^=avc1]+ba/b[height<=1080][ext=mp4]/bv*[height<=1080]+ba/b",
@@ -70,8 +70,8 @@ async function one(job) {
   rmSync(join(TMP, file));
   const meta = { title: info.title, channel: info.channel, uploader_id: info.uploader_id, uploader: info.uploader,
     view_count: info.view_count, duration: info.duration, start: a, end: b };
-  await api("/hook/material", { job_id: job.id, asset: file, meta });
-  console.log(`  ✅ готово — бот монтирует шортс #${job.id}`);
+  await api("/hook/material", { job_id: job.id, asset: file, meta, part: job.part });
+  console.log(job.part != null ? `  ✅ кадр ${job.part + 1} для лонга #${job.id} готов` : `  ✅ готово — бот монтирует шортс #${job.id}`);
 }
 
 async function main() {
@@ -89,7 +89,7 @@ async function main() {
   for (const job of jobs) {
     try { await one(job); } catch (e) {
       console.log(`  ⚠️ не получилось: ${e.message}`);
-      await api("/hook/material", { job_id: job.id, error: e.message }).catch(() => {});
+      await api("/hook/material", { job_id: job.id, part: job.part, error: e.message }).catch(() => {});
     }
   }
 }

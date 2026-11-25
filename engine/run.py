@@ -242,6 +242,11 @@ def longscript_job(job: dict, w: Worker) -> dict:
     from . import longform
     jid = job["id"]
     opts = _brief(job) or {}
+    if opts.get("mode") == "topic":  # a topic video from different YouTube channels, not from streams
+        from . import topic
+        prev = (job.get("result") or {}).get("script") if opts.get("wish") else None
+        return topic.research(opts.get("topic") or "", float(opts.get("minutes", 10)), opts.get("wish"), prev,
+                              progress=lambda s: w.stage(jid, s))
     w.stage(jid, "📚 Собираю библиотеку моментов")
     lib = w.get("/hook/library")
     library = lib.get("moments") or []

@@ -232,7 +232,7 @@ def card(out: Path, bg: Path, title: str, sub: str, vo: Path | None, wd: Path, *
 
 def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: int | None, streamer: str | None,
                  vo: Path | None = None, vo_text: str = "", duck: float = 1.0,
-                 lines: list[tuple[float, Path, str]] | None = None) -> float:
+                 lines: list[tuple[float, Path, str]] | None = None, credit: str | None = None) -> float:
     """A piece of the stream, full frame, corner badge with the place and the streamer credit.
 
     `lines` = narrator lines [(t in this segment, wav, text)] placed ON the action they describe: the stream
@@ -248,8 +248,8 @@ def clip_segment(out: Path, src: Path, a: float, b: float, wd: Path, *, rank: in
     if rank:
         fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, f'#{rank}')}':fontsize=110:fontcolor={NEON}:"
                f"borderw=8:bordercolor=black:x=40:y=30")
-    if streamer:
-        fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, f'twitch.tv/{streamer}')}':fontsize=44:"
+    if streamer or credit:
+        fx += (f",drawtext=fontfile='{_font()}':textfile='{_tf(wd, credit or f'twitch.tv/{streamer}')}':fontsize=44:"
                f"fontcolor=white:borderw=4:bordercolor=black:x=40:y=h-80:alpha=0.85")
     for (t0, wav, text), (s0, s1) in zip(lines, spans):
         for f in _caption_filters(wd, text, t0, s1 - t0 - 0.15):
@@ -343,18 +343,65 @@ def fmt(t: float) -> str:
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
 
 
+# ------------------------------------------------------------------ topic footage
+def prepare_topic_clips(job: dict, wd: Path, progress) -> list[dict]:
+    """Build one clip per point from the downloaded shots: every narrator sentence plays over the shot that
+    shows it; a shot shorter than its sentence is held on its last frame. Footage sound stays low."""
+    sc, footage = job["result"]["script"], job["result"]["footage"]
+    n = len(sc["items"])
+    files: dict[int, Path] = {}
+    for f in footage:
+        if not f.get("asset"):
+            continue
+        progress(f"⬇️ Беру кадры из хранилища {f['part'] + 1}/{len(footage)}")
+        files[f["part"]] = fetch.material_file(f["asset"], wd / "shots" / f"raw{f['part']}")
+    clips = []
+    for k, it in enumerate(sc["items"]):
+        shots = sorted(it["shots"], key=lambda s: int(s.get("line") or 0))
+        by_line = {int(s.get("line") or 0): s for s in shots}
+        pieces, lines, t, last = [], [], 0.0, shots[0]
+        for j, text in enumerate(it["vo_lines"]):
+            text = text if isinstance(text, str) else text.get("text", "")
+            s = by_line.get(j, last)
+            last = s
+            src = files.get(s.get("part"))
+            if src is None or not text.strip():
+                continue
+            d = tts(text, wd / "shots" / f"tl{k}_{j}.wav") + 0.35
+            out = wd / "shots" / f"p{k}_{j}.mp4"
+            run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-t", f"{d:.2f}", "-vf",
+                 f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},"
+                 f"tpad=stop_mode=clone:stop_duration={d:.2f},trim=duration={d:.2f},setsar=1",
+                 "-af", f"volume=0.5,apad,atrim=duration={d:.2f}", *_enc(out)])
+            pieces.append(out)
+            lines.append({"t": round(t + 0.15, 2), "text": text})
+            t += d
+        if not pieces:
+            continue
+        clip = concat(pieces, wd / "shots" / f"item{k}.mp4")
+        it["vo_lines"] = lines
+        ch = next((f["channel"] for f in footage if f["item"] == k), "")
+        clips.append({"src": clip, "a": 0.0, "b": probe(clip)["duration"], "peak": max(1.5, t / 2),
+                      "streamer": None, "credit": f"Footage: {ch}" if ch else None, "rank": n - k, "it": it})
+    if len(clips) < 3:
+        raise fetch.UserError("Не хватает скачанных кадров для лонга — запусти помощника на ноутбуке ещё раз.")
+    for k, c in enumerate(clips):  # places renumbered if a point had no footage
+        c["rank"] = len(clips) - k
+    return clips
+
+
 # ------------------------------------------------------------------ render
 def render(job: dict, wd: Path, progress) -> dict:
     sc = job["result"]["script"]
-    lib = {m["id"]: m for m in job["result"]["library"]}
+    lib = {m["id"]: m for m in job["result"].get("library") or []}
     items = sc["items"]
     n = len(items)
     wd.mkdir(parents=True, exist_ok=True)
 
     # 1. download every moment (1080p piece of the VOD). The range is the SAME one the anchoring AI watched,
-    #    so the narrator's timestamps match the picture exactly.
-    clips = []
-    for k, it in enumerate(items):
+    #    so the narrator's timestamps match the picture exactly. Topic videos use the shots the laptop downloaded.
+    clips = prepare_topic_clips(job, wd, progress) if job["result"].get("footage") else []
+    for k, it in enumerate(items if not clips else []):
         m = lib[it["cand"]]
         progress(f"⬇️ Скачиваю момент {k + 1}/{n} ({m.get('streamer')})")
         a, b = clip_range(m)
@@ -440,7 +487,8 @@ def render(job: dict, wd: Path, progress) -> dict:
         for t0, _, text, _ in c["lines"]:
             narration.append((t + t0, text))
         add(wd / f"s{r}_clip.mp4", clip_segment(wd / f"s{r}_clip.mp4", c["src"], c["a"], c["b"], wd, rank=r,
-                                                streamer=c["streamer"], lines=[x[:3] for x in c["lines"]]))
+                                                streamer=c["streamer"], lines=[x[:3] for x in c["lines"]],
+                                                credit=c.get("credit")))
         if (c["it"].get("vo_after") or "").strip():
             narration.append((t, c["it"]["vo_after"]))
             bga = frame_at(c["src"], c["b"] - 0.2, wd / f"bga{r}.jpg")
@@ -466,8 +514,12 @@ def render(job: dict, wd: Path, progress) -> dict:
     thumb = thumbnail(top["src"], top["peak"], sc.get("thumbnail_text") or "THEY LOST IT", wd / "thumb.jpg", wd)
     chap_txt = "\n".join(f"{fmt(a)} {name}" for a, name in chapters)
     streamers = sorted({c["streamer"] for c in clips if c["streamer"]})
-    desc = (sc.get("description") or "").strip() + "\n\nChapters:\n" + chap_txt + "\n\nStreamers:\n" + "\n".join(
-        f"https://twitch.tv/{s}" for s in streamers)
+    desc = (sc.get("description") or "").strip() + "\n\nChapters:\n" + chap_txt
+    if streamers:
+        desc += "\n\nStreamers:\n" + "\n".join(f"https://twitch.tv/{s}" for s in streamers)
+    if job["result"].get("sources"):
+        desc += "\n\nFootage from:\n" + "\n".join(f"{s['channel']} — https://youtu.be/{s['id']}"
+                                                 for s in job["result"]["sources"])
     return {"path": full, "thumb": thumb, "duration": total, "chapters": chapters, "description": desc,
             "narration": narration}
 

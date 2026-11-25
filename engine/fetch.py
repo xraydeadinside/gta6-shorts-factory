@@ -143,6 +143,30 @@ def download(url: str, workdir: Path, start: float | None = None, end: float | N
     return {"path": path, "meta": meta, "offset": a or 0.0, "link": link}
 
 
+def material_file(name: str, dest: Path) -> Path:
+    """Download one file the laptop helper put into the private materials repo."""
+    import os
+
+    import requests
+    repo, token = os.environ.get("MATERIALS_REPO", ""), os.environ.get("MATERIALS_TOKEN", "")
+    if not repo or not token:
+        raise RuntimeError("MATERIALS_REPO / MATERIALS_TOKEN не заданы")
+    h = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    rel = requests.get(f"https://api.github.com/repos/{repo}/releases/tags/materials", headers=h, timeout=30)
+    rel.raise_for_status()
+    asset = next((a for a in rel.json().get("assets", []) if a["name"] == name), None)
+    if not asset:
+        raise UserError(f"Не нашёл скачанный файл {name} в хранилище.")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    out = dest.with_suffix(Path(name).suffix or ".mp4")
+    with requests.get(asset["url"], headers={**h, "Accept": "application/octet-stream"}, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(out, "wb") as f:
+            for chunk in r.iter_content(1 << 20):
+                f.write(chunk)
+    return out
+
+
 def from_material(job: dict, workdir: Path) -> dict:
     """Clip that the laptop helper downloaded (YouTube) and put into the private materials repo."""
     import json

@@ -178,6 +178,13 @@ async function onCommand(env, { cmd, arg }, origin) {
     const brief = JSON.stringify({ mode: "collect", hours: rest[0] || 3, from_hours: rest[1] || 0 });
     return newJob(env, "vod", u, { brief, note: "сбор моментов для лонга" });
   }
+  if (cmd === "topic") {
+    if (!arg) return say(env, "Пришли так: <code>/topic beginner mistakes 12</code> (тема по-английски или по-русски, число — минуты)");
+    const num = (arg.match(/\b(\d{1,2})\b/) || [])[1];
+    const minutes = Math.max(6, Math.min(20, Number(num) || 10));
+    const topic = arg.replace(/\b\d{1,2}\b/, "").trim();
+    return newJob(env, "long", "topic:" + topic.slice(0, 80), { brief: JSON.stringify({ mode: "topic", topic, minutes }), note: topic });
+  }
   if (cmd === "long") {
     const num = (arg.match(/\b(\d{1,2})\b/) || [])[1];
     const minutes = Math.max(6, Math.min(20, Number(num) || 10));
@@ -249,7 +256,8 @@ async function sendScript(env, id, res) {
   const items = (sc.items || []).map((it, k) => {
     const m = lib[it.cand] || {};
     const lines = (it.vo_lines || []).length
-      ? it.vo_lines.map((l) => `▶ ${Number(l.t).toFixed(0)}с: <i>${esc(l.text)}</i>`).join("\n")
+      ? it.vo_lines.map((l) => (typeof l === "string" ? `▶ <i>${esc(l)}</i>` : `▶ ${Number(l.t).toFixed(0)}с: <i>${esc(l.text)}</i>`)).join("\n") +
+        ((it.sources || []).length ? `\n📎 подтверждают ролики: ${it.sources.length}` : "")
       : `<i>${esc(it.vo_before || "")}</i>`;
     return `<b>#${n - k} ${esc(it.label_en || "")}</b> · ${esc(m.streamer || "")}\n${esc(it.what_ru || m.what_ru || "")}\n${lines}`;
   });
@@ -319,6 +327,11 @@ async function doAction(env, job, act, arg, text, source) {
     try { b = JSON.parse(job.brief || "{}"); } catch (e) { b = {}; }
     if (act === "la") {
       if (job.status !== "script") return reply("Этот сценарий уже в работе или готов.");
+      if (b.mode === "topic") {   // shots come from YouTube: the laptop helper downloads them first
+        await updateJob(env, job.id, { status: "laptop", stage: "ждёт помощника на ноутбуке (кадры с YouTube)" });
+        const parts = ((job.result || {}).footage || []).length;
+        return reply(`📥 Лонг #${job.id}: сценарий утверждён. Нужно скачать ${parts} коротких кадров с YouTube — запусти на ноутбуке ярлык «Скачать с YouTube». Как только всё скачается, я сам начну монтаж.`);
+      }
       await updateJob(env, job.id, { status: "queued", stage: "в очереди на монтаж" });
       await dispatchOrFail(env, "long", job.id);
       return reply(`🎬 Лонг #${job.id}: сценарий утверждён, монтирую. Это займёт 20–40 минут — пришлю превью, обложку и описание.`);
@@ -493,8 +506,19 @@ async function hook(req, env, ctx, p, origin) {
   }
   // --- laptop helper (YouTube is downloaded from the owner's home internet, not from GitHub servers)
   if (p === "/hook/materials" && req.method === "GET") {
-    const rows = await env.DB.prepare("SELECT id, url, start, end_t FROM jobs WHERE status = 'laptop' ORDER BY id").all();
-    return json({ jobs: (rows.results || []).map((r) => ({ id: r.id, url: r.url, start: r.start, end: r.end_t })) });
+    const rows = await env.DB.prepare("SELECT id, kind, url, start, end_t, result FROM jobs WHERE status = 'laptop' ORDER BY id").all();
+    const jobs = [];
+    for (const r of rows.results || []) {
+      if (r.kind === "long") {   // a topic long: every missing shot is a separate small task
+        const res = r.result ? JSON.parse(r.result) : {};
+        for (const f of res.footage || []) {
+          if (!f.asset) jobs.push({ id: r.id, part: f.part, url: f.url, start: f.start, end: f.end });
+        }
+      } else {
+        jobs.push({ id: r.id, url: r.url, start: r.start, end: r.end_t });
+      }
+    }
+    return json({ jobs });
   }
   const body = await req.json();
   if (p === "/hook/newclip") {
@@ -509,6 +533,27 @@ async function hook(req, env, ctx, p, origin) {
     const r = { ...(job.result || {}), library: body.library || [], partial: true };
     await updateJob(env, job.id, { result: r });
     return json({ ok: true, saved: (body.library || []).length });
+  }
+  if (p === "/hook/material" && job && job.kind === "long") {
+    const r = job.result || {};
+    const f = (r.footage || []).find((x) => x.part === Number(body.part));
+    if (!f) return json({ error: "no part" }, 404);
+    if (body.error) f.failed = String(body.error).slice(0, 200);
+    else { f.asset = String(body.asset); delete f.failed; }
+    const left = (r.footage || []).filter((x) => !x.asset && !x.failed).length;
+    const got = (r.footage || []).filter((x) => x.asset).length;
+    await updateJob(env, job.id, { result: r, stage: `кадры с YouTube: ${got}/${(r.footage || []).length}` });
+    if (!left) {
+      if (got < Math.max(3, Math.ceil((r.footage || []).length * 0.6))) {
+        await updateJob(env, job.id, { status: "failed", stage: "ошибка", error: "не скачалось слишком много кадров" });
+        await say(env, `⚠️ Лонг #${job.id}: скачалось только ${got} из ${(r.footage || []).length} кадров. Запусти помощника ещё раз или «Переписать».`);
+      } else {
+        await updateJob(env, job.id, { status: "queued", stage: "в очереди на монтаж" });
+        await dispatchOrFail(env, "long", job.id);
+        await say(env, `🎬 Лонг #${job.id}: кадры скачаны (${got}), монтирую. Пришлю превью, обложку и описание через 20–40 минут.`);
+      }
+    }
+    return json({ ok: true, left });
   }
   if (p === "/hook/material") {
     if (!job) return json({ error: "no job" }, 404);
