@@ -38,6 +38,15 @@ function timecode(url) {
   return g ? (Number(g[1] || 0) * 3600 + Number(g[2] || 0) * 60 + Number(g[3] || 0)) : null;
 }
 
+function apiCurl(path, body) {
+  // Windows' own curl: works when Node's DNS lookup fails (seen on this laptop: ENOTFOUND while curl is fine)
+  const args = ["-s", "-m", "60", "-H", `x-hook-secret: ${env.HOOK_SECRET}`, "-H", "content-type: application/json"];
+  if (body) args.push("-X", "POST", "--data-binary", "@-");
+  const r = spawnSync("curl.exe", [...args, env.WORKER_URL + path], { encoding: "utf8", input: body ? JSON.stringify(body) : undefined });
+  if (r.status !== 0 || !r.stdout) throw new Error(`curl: ${(r.stderr || "").slice(0, 200) || r.status}`);
+  return JSON.parse(r.stdout);
+}
+
 async function api(path, body) {
   let last;
   for (let i = 0; i < 4; i++) {   // home internet drops sometimes: retry
@@ -45,7 +54,11 @@ async function api(path, body) {
       const r = await fetch(env.WORKER_URL + path, body ? { method: "POST", headers: H, body: JSON.stringify(body) } : { headers: H });
       if (!r.ok) throw new Error(`бот ответил ${r.status}`);
       return await r.json();
-    } catch (e) { last = e; await new Promise((s) => setTimeout(s, 3000 * (i + 1))); }
+    } catch (e) {
+      last = e;
+      try { return apiCurl(path, body); } catch (e2) { last = e2; }
+      await new Promise((s) => setTimeout(s, 3000 * (i + 1)));
+    }
   }
   throw last;
 }
