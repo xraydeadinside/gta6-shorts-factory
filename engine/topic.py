@@ -94,8 +94,26 @@ def search(topic: str, n: int = 6) -> list[dict]:
     return vids[:n]
 
 
+CACHE = __import__("pathlib").Path.home() / ".cache" / "topic"
+
+
 def watch(video: dict, topic: str) -> dict:
-    part = {"file_data": {"file_uri": f"https://www.youtube.com/watch?v={video['id']}"}}
+    """Cached: if Gemini fails later (e.g. while writing the script), a retry does not re-watch the videos."""
+    import hashlib
+    CACHE.mkdir(parents=True, exist_ok=True)
+    f = CACHE / f"{video['id']}_{hashlib.sha1(topic.lower().encode()).hexdigest()[:10]}.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    out = _watch(video, topic)
+    f.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+def _watch(video: dict, topic: str) -> dict:
+    part ={"file_data": {"file_uri": f"https://www.youtube.com/watch?v={video['id']}"}}
     dur = int(video.get("duration") or 0)
     prompt = f"""Topic of our video: "{topic}". You see a YouTube video "{video['title']}" by {video['channel']}.
 The video is {dur} seconds long ({dur // 60}:{dur % 60:02d}): every timestamp MUST be between 0 and {dur}.

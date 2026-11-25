@@ -64,6 +64,14 @@ jobs:
 
       - run: pip install -q -r requirements.txt && pip install -q -U yt-dlp
 
+      - name: Watched-videos cache (topic research survives a Gemini failure)
+        if: env.KIND == 'longscript'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/topic
+          key: topic-${{ github.run_id }}
+          restore-keys: topic-
+
       - name: Voice cache (ElevenLabs lines already paid for are reused on a re-edit)
         if: env.KIND == 'long'
         uses: actions/cache@v4
