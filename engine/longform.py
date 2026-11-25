@@ -350,6 +350,7 @@ def prepare_topic_clips(job: dict, wd: Path, progress) -> list[dict]:
     sc, footage = job["result"]["script"], job["result"]["footage"]
     n = len(sc["items"])
     files: dict[int, Path] = {}
+    (wd / "shots").mkdir(parents=True, exist_ok=True)
     for f in footage:
         if not f.get("asset"):
             continue
