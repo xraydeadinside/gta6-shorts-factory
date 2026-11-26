@@ -21,9 +21,9 @@
     "what_ru": "Проскакивать сюжет и закончить 1-ю главу, не сделав главного",
     "shots": [
      {
-      "video": "r3oAEokOT5w",
-      "start": 919,
-      "end": 953,
+      "video": "FvbVccBoVds",
+      "start": 234,
+      "end": 268,
       "line": 0,
       "part": 0
      },
@@ -37,7 +37,8 @@
     ],
     "sources": [
      "r3oAEokOT5w",
-     "CiHuzgwaWYw"
+     "CiHuzgwaWYw",
+     "FvbVccBoVds"
     ],
     "vo_lines": [
      "Number ten: rushing the story.",
@@ -46,6 +47,7 @@
      "GTA 6 hides a lot of its best stuff off the main path.",
      "If you only chase the next mission marker, you'll blow past most of it.",
      "Take a detour now and then. That's where this game really opens up.",
+     "Side content also tends to pay you back later, with money, gear, or just a better understanding of the map.",
      "Here's the simple fix: after every main mission, do one thing that isn't a mission.",
      "Explore a street you haven't seen, check out a side activity, or just follow whatever looks weird.",
      "You'll be surprised how much of this list connects back to that one habit."
@@ -82,6 +84,7 @@
      "Fast travel exists for a reason.",
      "Guides point out it can even save you money, not just time.",
      "Drive when you want to enjoy the ride, not because you forgot there's a shortcut.",
+     "Every minute on the road is a minute you are not earning, upgrading, or having fun.",
      "A good rule: if the trip is boring the second time, fast travel the third time.",
      "Save the long drives for when you actually want to enjoy the world.",
      "And speaking of cars, the next mistake costs a lot more than time."
@@ -118,6 +121,7 @@
      "Then you find something better an hour later, and that money is just gone.",
      "Spend on a car you'll actually keep using.",
      "Everything else can wait until you're rich.",
+     "A fully upgraded car you stop using next week is the most expensive mistake on this list.",
      "The fix is easy: pick one reliable car and stick with it for a while.",
      "Upgrade that one, and ignore the rest until money stops being a problem.",
      "Because there are much better things to spend on early, and we'll get to those."
@@ -154,6 +158,7 @@
      "The earlier you start, the easier every mission after that becomes.",
      "So many players only find out about this deep into the game.",
      "Don't be one of them.",
+     "Think of it as investing in yourself before you invest in anything else.",
      "Make it part of your routine, the same way you'd grab ammo before a mission.",
      "A stronger character means fewer failed missions, and fewer failed missions means more money.",
      "And more money is useless if you get it the wrong way, which brings us to number six."
@@ -190,6 +195,7 @@
      "Robberies in GTA 6 reward a little planning.",
      "Creators who tested it say a smarter approach pays more and brings less heat.",
      "Think first, then cause chaos.",
+     "And remember, the police in GTA 6 do not forget easily, so a messy job can follow you around.",
      "Look before you go in. Know your way out before anyone calls the cops.",
      "A clean job beats a loud one almost every time.",
      "Of course, a clean job also depends on what you're carrying."
@@ -227,6 +233,7 @@
      "And some special weapons can be picked up early, if you know where to look.",
      "Several guides call them out as things you should grab before moving on.",
      "Better gear now means fewer restarts later.",
+     "It is the difference between barely surviving a shootout and controlling it.",
      "If a mission feels way too hard, your weapon might be the problem, not your aim.",
      "Spend a little on upgrades before you spend a lot on anything else.",
      "And speaking of spending, there's money you're probably not even collecting."
@@ -264,9 +271,10 @@
      "Different creators found it in different spots, which tells you how easy it is to miss.",
      "A few minutes of looking around can set you up for hours.",
      "Check those guides, then go collect.",
+     "Spend ten minutes looking around after the first few missions, and your bank account will feel it.",
      "Think of it as a head start that most players never take.",
      "That early money pays for upgrades, weapons, and everything else on this list.",
-     "Now we're into the top three, and these are the ones players regret the most."
+     "And the next one sounds boring, until it costs you an hour of progress."
     ],
     "vo_after": "Free money is the best money."
    },
@@ -302,6 +310,7 @@
      "Make a manual save before anything important.",
      "It takes ten seconds.",
      "Guides recommend specific moments in Chapter One where a manual save really matters.",
+     "Keep more than one save, too, so one bad moment never wipes out everything.",
      "Make it a habit: new mission, quick manual save.",
      "Big purchase, quick manual save.",
      "Because the next mistake is all about money, and losing progress after spending it is the worst feeling in this game."
@@ -348,6 +357,7 @@
      "One creator literally calls it a massive cash mistake.",
      "Protect your money in the first hours.",
      "Spend on what makes you stronger or makes you more money. The rest can wait.",
+     "Money in this game snowballs, so every smart early decision makes the next one easier.",
      "Here's a simple test before you buy anything: will this help me earn more?",
      "If the answer is no, it can wait a few hours.",
      "And now, the number one mistake, the one you really can't take back."
@@ -393,6 +403,7 @@
      "Different guides list missable side missions, a unique weapon, and things you should do before you leave.",
      "So before you finish Chapter One, stop, and go through that checklist.",
      "Your future self will thank you.",
+     "Out of everything in this video, this is the one I would check tonight.",
      "If you're still in Chapter One right now, you're in luck. Pause, check, and grab everything.",
      "If you already finished it, don't worry too much. Just remember this lesson for the next chapter.",
      "Because GTA 6 rewards the players who slow down and look around."
@@ -422,11 +433,11 @@
  "footage": [
   {
    "part": 0,
-   "url": "https://www.youtube.com/watch?v=r3oAEokOT5w",
-   "start": 919,
-   "end": 953,
+   "url": "https://www.youtube.com/watch?v=FvbVccBoVds",
+   "start": 234,
+   "end": 268,
    "item": 0,
-   "channel": "Vexies"
+   "channel": "Holy13"
   },
   {
    "part": 1,

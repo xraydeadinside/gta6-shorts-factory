@@ -23,7 +23,7 @@ const piece = (v, a, b, line, len = 34) => {
 // ordered from #10 (first shown) to #1
 const items = [
   { label_en: "RUSHING THE STORY", what_ru: "Проскакивать сюжет и закончить 1-ю главу, не сделав главного",
-    shots: [piece("vex", "15:12", null, 0), piece("big", "0:00", "0:35", 1)], sources: ["vex", "big"],
+    shots: [piece("holy", "3:47", "5:21", 0), piece("big", "0:00", "0:35", 1)], sources: ["vex", "big", "holy"],
     vo_lines: [
       "Number ten: rushing the story.",
       "I get it. The missions are exciting, and you want to see what happens next.",

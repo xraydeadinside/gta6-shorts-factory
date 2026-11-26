@@ -109,7 +109,7 @@ def _elevenlabs(text: str, raw: Path) -> bool:
     v = (config().get("voice") or {})
     voice_id, model = v.get("voice_id", "TX3LPaxmHKxFdv7VOQHJ"), v.get("model", "eleven_multilingual_v2")
     import hashlib
-    h = hashlib.sha1(f"{voice_id}|{model}|{text}".encode()).hexdigest()
+    h = hashlib.sha1(f"{voice_id}|{model}|{v.get('speed', 0.92)}|{text}".encode()).hexdigest()
     TTS_CACHE.mkdir(parents=True, exist_ok=True)
     cached = TTS_CACHE / f"{h}.mp3"
     if not cached.exists():
@@ -117,7 +117,8 @@ def _elevenlabs(text: str, raw: Path) -> bool:
                           headers={"xi-api-key": key, "content-type": "application/json"}, timeout=120,
                           json={"text": text, "model_id": model, "voice_settings": {
                               "stability": float(v.get("stability", 0.38)), "similarity_boost": 0.8,
-                              "style": float(v.get("style", 0.35)), "use_speaker_boost": True}})
+                              "style": float(v.get("style", 0.35)), "use_speaker_boost": True,
+                              "speed": float(v.get("speed", 0.92))}})
         if r.status_code != 200:
             print(f"ElevenLabs failed ({r.status_code}): {r.text[:200]} — using the free voice")
             return False
@@ -398,7 +399,7 @@ def prepare_topic_clips(job: dict, wd: Path, progress) -> list[dict]:
             src = files.get(s.get("part"))
             if src is None or not text.strip():
                 continue
-            d = tts(text, wd / "shots" / f"tl{k}_{j}.wav") + 0.35
+            d = tts(text, wd / "shots" / f"tl{k}_{j}.wav") + 0.6   # a breath between sentences
             p = s.get("part")
             length = probe(src)["duration"]
             ss = pos.get(p, 0.0)
@@ -689,6 +690,7 @@ def store_full(path: Path) -> str | None:
     rel = r.json()
     up = re.sub(r"\{.*\}$", "", rel["upload_url"])
     with path.open("rb") as f:
-        u = requests.post(f"{up}?name={path.name}", headers={**h, "Content-Type": "video/mp4"}, data=f, timeout=1800)
+        name = f"{path.stem}_{int(__import__('time').time())}{path.suffix}"   # GitHub won't overwrite a name
+        u = requests.post(f"{up}?name={name}", headers={**h, "Content-Type": "video/mp4"}, data=f, timeout=1800)
     u.raise_for_status()
     return rel.get("html_url")

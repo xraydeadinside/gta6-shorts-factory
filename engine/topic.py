@@ -71,9 +71,12 @@ def _iso_seconds(d: str) -> int:
     return dd * 86400 + h * 3600 + mi * 60 + s
 
 
+WPM = 168   # measured speaking rate of the narrator (ElevenLabs Liam, speed 0.92) incl. pauses
+
+
 def target_words(minutes: float) -> int:
     """Narration needed for a topic video of this length (the voice runs ~88% of it, ~150 words/min)."""
-    return int(minutes * 150 * 0.88)
+    return int(minutes * WPM * 0.85)
 
 
 def narration_words(sc: dict) -> int:
@@ -204,7 +207,7 @@ SCRIPT: {json.dumps(sc, ensure_ascii=False)[:30000]}"""
     sc["minutes"] = minutes
     sc["topic"] = topic
     sc["words"] = narration_words(sc)
-    sc["est_minutes"] = round(sc["words"] / 150 / 0.88 + 0.4, 1)
+    sc["est_minutes"] = round(sc["words"] / WPM / 0.85 + 0.3, 1)
     footage = []
     for k, it in enumerate(sc["items"]):
         for j, s in enumerate(it["shots"]):
